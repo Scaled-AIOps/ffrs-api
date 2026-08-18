@@ -84,3 +84,17 @@ describe('POST /api/feedback', () => {
     expect((await app(evt('GET', '/api/nope'))).statusCode).toBe(404);
   });
 });
+
+describe('POST /api/feedback (form, no-JS)', () => {
+  it('redirects to /feedback/?sent=1&ref=… on success and ?error= on validation failure', async () => {
+    const { app, repo } = testApp();
+    const form = 'kind=feature&title=Add+RSS&body=A+feed+of+framework+changes+please&email=&consent=&website=';
+    const ok = await app({ ...evt('POST', '/api/feedback', undefined, { 'content-type': 'application/x-www-form-urlencoded' }), body: form });
+    expect(ok.statusCode).toBe(303);
+    expect(String(ok.headers?.['location'])).toMatch(/^https:\/\/www\.scaledaiops\.org\/feedback\/\?sent=1&ref=FB-[A-Z0-9]{6}$/);
+    expect(repo.rows[0]!.email).toBeNull();
+    const bad = await app({ ...evt('POST', '/api/feedback', undefined, { 'content-type': 'application/x-www-form-urlencoded' }), body: 'kind=bug&title=x&body=short' });
+    expect(bad.statusCode).toBe(303);
+    expect(decodeURIComponent(String(bad.headers?.['location'] ?? ''))).toContain('?error=title:');
+  });
+});

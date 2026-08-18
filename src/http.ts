@@ -31,8 +31,23 @@ export function corsHeaders(evt: APIGatewayProxyEventV2, allowed: string[]): Rec
   };
 }
 
-export function parseJsonBody(evt: APIGatewayProxyEventV2): unknown {
+export function isForm(evt: APIGatewayProxyEventV2): boolean {
+  return (header(evt, 'content-type') ?? '').startsWith('application/x-www-form-urlencoded');
+}
+
+/** JSON body, or a form body coerced to the same shape (empty fields dropped, checkbox → boolean). */
+export function parseBody(evt: APIGatewayProxyEventV2): unknown {
   if (!evt.body) return undefined;
   const raw = evt.isBase64Encoded ? Buffer.from(evt.body, 'base64').toString('utf8') : evt.body;
-  return JSON.parse(raw) as unknown; // throws SyntaxError → 400 in handler
+  if (!isForm(evt)) return JSON.parse(raw) as unknown; // throws SyntaxError → 400 in handler
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of new URLSearchParams(raw)) {
+    if (v === '') continue;
+    out[k] = k === 'consent' ? v === 'true' || v === 'on' : v;
+  }
+  return out;
+}
+
+export function redirect(location: string): Res {
+  return { statusCode: 303, headers: { location, 'cache-control': 'no-store' }, body: '' };
 }

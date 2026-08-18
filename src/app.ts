@@ -8,7 +8,7 @@ import { FeedbackInput } from './domain/schema.js';
 import { isHoneypotTripped } from './guards/honeypot.js';
 import type { RateLimiter } from './guards/rateLimit.js';
 import type { TurnstileVerify } from './guards/turnstile.js';
-import { clientIp, corsHeaders, error, header, json, parseJsonBody, type Res } from './http.js';
+import { clientIp, corsHeaders, error, header, isForm, json, parseBody, redirect, type Res } from './http.js';
 import { log } from './log.js';
 
 /** Everything the HTTP app needs, injected — so tests build it with memory implementations. */
@@ -46,6 +46,19 @@ export function createApp(deps: AppDeps): (evt: APIGatewayProxyEventV2) => Promi
 }
 
 async function postFeedback(deps: AppDeps, evt: APIGatewayProxyEventV2): Promise<Res> {
+  // No-JS path: the /feedback/ page posts a form; answer with a redirect back to it instead of JSON.
+  if (isForm(evt)) {
+    const res = await postFeedbackJson(deps, evt);
+    const page = `${deps.cfg.SITE_URL}/feedback/`;
+    const body = JSON.parse(res.body ?? '{}') as { ref?: string; error?: { message?: string; details?: Array<{ path: string; message: string }> } };
+    if (body.ref) return redirect(`${page}?sent=1&ref=${body.ref}`);
+    const msg = body.error?.details?.map((d) => `${d.path}: ${d.message}`).join('; ') ?? body.error?.message ?? 'unknown error';
+    return redirect(`${page}?error=${encodeURIComponent(msg)}`);
+  }
+  return postFeedbackJson(deps, evt);
+}
+
+async function postFeedbackJson(deps: AppDeps, evt: APIGatewayProxyEventV2): Promise<Res> {
   if (!(await deps.isEnabled())) return error(503, 'ffrs_disabled', 'feedback is temporarily disabled');
 
   const ip = clientIp(evt);
@@ -53,7 +66,7 @@ async function postFeedback(deps: AppDeps, evt: APIGatewayProxyEventV2): Promise
 
   let input: FeedbackInput;
   try {
-    input = FeedbackInput.parse(parseJsonBody(evt));
+    input = FeedbackInput.parse(parseBody(evt));
   } catch (err) {
     if (err instanceof ZodError) return error(400, 'invalid_input', 'validation failed', err.issues.map((i) => ({ path: i.path.join('.'), message: i.message })));
     if (err instanceof SyntaxError) return error(400, 'invalid_json', 'body must be JSON');
