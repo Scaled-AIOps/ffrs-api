@@ -1,7 +1,7 @@
 {
   "name": "ffrs-api",
   "version": "0.1.0",
-  "description": "Fast Feedback Response System \u2014 capture API (Lambda + Neon)",
+  "description": "Fast Feedback Response System \u2014 capture API (Lambda; GitHub Issues as the record, S3 sidecar)",
   "type": "module",
   "license": "MIT",
   "engines": {
@@ -13,16 +13,12 @@
     "test:watch": "vitest",
     "build": "node esbuild.config.mjs",
     "package": "npm run build && rm -f dist/handler.zip && cd dist && zip -q handler.zip handler.mjs handler.mjs.map",
-    "db:generate": "drizzle-kit generate",
-    "db:migrate": "drizzle-kit migrate",
     "check": "npm run typecheck && npm test && npm run package",
     "export": "tsx scripts/export.ts export",
     "metrics": "tsx scripts/export.ts metrics"
   },
   "dependencies": {
     "@aws-sdk/s3-request-presigner": "^3.1112.0",
-    "@neondatabase/serverless": "^1.0.1",
-    "drizzle-orm": "^0.44.4",
     "zod": "^4.0.17"
   },
   "devDependencies": {
@@ -31,10 +27,9 @@
     "@aws-sdk/client-ssm": "^3.864.0",
     "@types/aws-lambda": "^8.10.152",
     "@types/node": "^24.3.0",
-    "drizzle-kit": "^0.31.4",
     "esbuild": "^0.25.9",
+    "tsx": "^4.20.4",
     "typescript": "^5.9.2",
-    "vitest": "^3.2.4",
-    "tsx": "^4.20.4"
+    "vitest": "^3.2.4"
   }
 }

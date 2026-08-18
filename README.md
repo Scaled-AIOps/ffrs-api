@@ -1,62 +1,60 @@
 # ffrs-api
 
-Capture API of the **Fast Feedback Response System** (FFRS) — a Node 22 Lambda backed by Neon Postgres. Reference implementation for scaledaiops.org; reusable by any site via one `<script>` tag (widget) and a handful of env vars (API). Plan and rationale: `scaledaiops.org/docs/ffrs-plan.md`.
+Capture API of the **Fast Feedback Response System** (FFRS). Dependency-minimal by design: **GitHub Issues is the system of record**, one Node 22 Lambda routes to it, and a private S3 prefix holds the only personal data (a per-item sidecar with the submitter's email). No database. Reference implementation for scaledaiops.org; reusable by any site via one `<script>` tag (widget) and a handful of env vars. Plan: `scaledaiops.org/docs/ffrs-plan.md`.
+
+## How the FFRS stages map
+
+| Stage | Where it is recorded |
+|---|---|
+| Capture / Route | the GitHub issue (`created_at`), labels `ffrs`, `kind:*`, `severity:*`, hidden marker `<!-- ffrs:FB-XXXXXX -->` |
+| Acknowledge | ack email (consented submitters) — `acknowledgedAt` in the S3 sidecar |
+| Respond | first comment by a human on the issue (GitHub) |
+| Close | issue closed (GitHub); outcome = `outcome:*` label › `state_reason` › kind default; closing email via webhook — `closeEmailAt` in the sidecar |
 
 ## Routes
 
 | Route | Purpose |
 |---|---|
-| `POST /api/feedback` | Capture. Validates (Zod) → guards (rate limit, honeypot, Turnstile) → durable insert + queued side effects → `202 {ref}`. Idempotent on `Idempotency-Key`. |
-| `GET /api/feedback/:ref` | Public status timeline (never body/email/screenshot). |
-| `POST /api/webhooks/github` | Loop closure. HMAC-verified (`X-Hub-Signature-256`). `issues.closed` → `status=closed`, `outcome` (label `outcome:*` > `state_reason` > kind default), `closed_at`, queues `close_email`; `issues.reopened` → back to `routed`; `issue_comment.created` by a human → `responded_at` (first write). Route is 404 unless `GITHUB_WEBHOOK_SECRET` is set. |
-| EventBridge weekly (Mon 07:00 UTC, `{job:"weekly_report"}`) | Posts last week's FFRS metrics (per kind: n, TTA/TTR/TTFR/TTC percentiles, loop closure, signal ratio) as a GitHub issue labelled `ffrs-report`; logs it when GitHub isn't configured. |
-| EventBridge (1 min, `{job:"drain_outbox"}`) | Drains the `side_effects` outbox with backoff (1m→6h, then parked). Effects: `ack_email` (stamps `acknowledged_at`), `github_issue` (stamps `routed_at`, status→routed, stores issue URL), `alert_email`. Missing settings ⇒ effect not registered, rows parked with a startup warning. |
+| `POST /api/feedback` | Validate (Zod) → guards (rate limit, honeypot, Turnstile) → screenshot to S3 (private, presigned 7-day link in the issue) → **create issue** → ack + alert email (best-effort) → sidecar → `202 {ref}`. Idempotent on `Idempotency-Key`. GitHub down ⇒ `502 route_failed` (nothing half-stored; widget retries). Also accepts form-encoded → 303 to `/feedback/`. |
+| `GET /api/feedback/:ref` | Public timeline from GitHub + sidecar (timestamps only, never email/body). |
+| `POST /api/webhooks/github` | HMAC-verified. `issues.closed` → closing email once; `reopened` re-arms. 404 unless `GITHUB_WEBHOOK_SECRET`. |
+| EventBridge weekly (`{job:"weekly_report"}`) | Metrics per kind × ISO week (TTFR p50/p90, TTC p50, loop closure, signal) computed from the Issues API, filed as an issue labelled `ffrs-report`. |
 
 ## Env
 
 | Var | Required | Notes |
 |---|---|---|
-| `DATABASE_URL` | yes | Neon connection string |
-| `SITE_NAME` | yes | e.g. `scaledaiops.org` |
-| `TURNSTILE_SECRET` | prod | absent = guard off (warned at startup) |
-| `SCREENSHOT_BUCKET` | opt | absent = screenshots rejected with `screenshots_disabled` |
-| `ALLOWED_ORIGINS` | opt | comma-separated third-party embedders (CORS); same-origin needs nothing |
-| `SSM_PREFIX` | prod | e.g. `/ffrs` → at cold start `DATABASE_URL`/`TURNSTILE_SECRET`/`GITHUB_TOKEN` are read from `${SSM_PREFIX}/<lower_name>` (SecureString) if not in env; runtime kill switch at `${SSM_PREFIX}/enabled`, cached 60 s |
-| `FFRS_ENABLED` | opt | `true`/`false` fallback when `SSM_PREFIX` unset |
-| `RATE_LIMIT_PER_MIN` | opt | default 5, per hashed IP, per Lambda instance |
-| `SITE_URL` | opt | base for status links in emails/issues (default `https://www.scaledaiops.org`) |
-| `FROM_EMAIL` | effects | SES sender; enables `ack_email` (and `alert_email` with `ALERT_EMAIL`) |
-| `ALERT_EMAIL` | effects | maintainer inbox for new-feedback alerts |
-| `GITHUB_WEBHOOK_SECRET` | loop | SSM `/ffrs/github_webhook_secret`; enables the webhook route |
-| `GITHUB_REPO` + `GITHUB_TOKEN` | effects | `owner/repo` + token (SSM) → enables `github_issue`; screenshot embedded via 7-day presigned URL |
+| `GITHUB_REPO`, `GITHUB_TOKEN` | yes | `owner/repo`; fine-grained token with Issues read/write on that repo (token via SSM) |
+| `DATA_BUCKET` | yes | private S3 bucket: `sidecar/`, `idem/`, `screenshots/` |
+| `SITE_NAME`, `SITE_URL` | yes / default | branding + status links |
+| `FROM_EMAIL`, `ALERT_EMAIL` | opt | SES sender (enables ack/close emails) and maintainer alert inbox |
+| `TURNSTILE_SECRET` | prod | absent = guard off (warned) |
+| `GITHUB_WEBHOOK_SECRET` | loop | enables the webhook route |
+| `SSM_PREFIX` | prod | `/ffrs` → secrets read at cold start (`github_token`, `github_webhook_secret`, `turnstile_secret`); kill switch `${SSM_PREFIX}/enabled` cached 60 s |
+| `ALLOWED_ORIGINS`, `RATE_LIMIT_PER_MIN`, `FFRS_ENABLED` | opt | CORS embedders; default 5/min per hashed IP; env fallback for the kill switch |
 
 ## Develop
 
 ```bash
 npm install
-npm run check          # typecheck + vitest + esbuild + zip → dist/handler.zip (what Terraform deploys)
-DATABASE_URL=… npm run db:migrate   # applies drizzle/*.sql incl. the ffrs_metrics view
-DATABASE_URL=… npm run metrics > metrics.csv    # weekly ffrs_metrics view as CSV (paper data)
-DATABASE_URL=… npm run export  > feedback.csv   # anonymised per-item rows: no body, email or screenshot
+npm run check      # typecheck + vitest (in-memory Tracker/Store, no network) + esbuild + zip → dist/handler.zip
+GITHUB_TOKEN=… GITHUB_REPO=Scaled-AIOps/feedback npm run metrics > metrics.csv   # paper data
+GITHUB_TOKEN=… GITHUB_REPO=Scaled-AIOps/feedback npm run export  > feedback.csv  # anonymised rows
 ```
 
-Tests use `memoryRepo` — no database needed. `neonRepo` is the production `FeedbackRepo`; both satisfy the same interface (`src/domain/repo.ts`).
+## GitHub setup (once)
 
-## GitHub webhook setup (once)
-
-Repo → Settings → Webhooks → Add: Payload URL `https://www.scaledaiops.org/api/webhooks/github`, content type `application/json`, secret = value of SSM `/ffrs/github_webhook_secret`, events **Issues** + **Issue comments**. Optional labels `outcome:fixed|shipped|answered|declined|wontfix|duplicate` override the inferred outcome when closing.
+Repo labels are created on first use. Webhook: Settings → Webhooks → `https://<site>/api/webhooks/github`, JSON, events **Issues**, secret = SSM `/ffrs/github_webhook_secret`. Add `outcome:*` labels before closing to override the inferred outcome; label `spam` to exclude from the signal ratio.
 
 ## Layout
 
 ```
-src/handler.ts      Lambda entry: wires config → repo/blobs/guards → app; schedule → outbox
-src/app.ts          HTTP routing + guards, framework-free
-src/domain/         capture() (stage 1), webhook transitions (stages 4–5), Zod input schema, ref generator, repo interfaces
-src/db/             drizzle schema, neonRepo, memoryRepo, s3Blobs
-src/guards/         honeypot, rateLimit, turnstile
-src/effects/        Effect plug-ins: ackEmail, alertEmail, githubIssue; SES mailer; templates; buildEffects(cfg)
-src/outbox.ts       claim → run → complete / fail-with-backoff
-src/reports/        weekly report (markdown) + runner; src/domain/metrics.ts is the TS twin of the SQL view
-scripts/export.ts   CSV export CLI
-drizzle/            migrations (0000 schema, 0001 ffrs_metrics view)
+src/handler.ts        Lambda entry: SSM secrets → config → adapters → app; job dispatch
+src/app.ts            HTTP routing + guards
+src/domain/           ports (Tracker, Store), capture(), status view, metrics, webhook, schema, ref
+src/adapters/         githubTracker (REST), s3Store, memory twins for tests
+src/effects/          templates (ack, alert, close, issue body), SES mailer
+src/guards/           honeypot, rateLimit, turnstile
+src/reports/          weekly report + runner
+scripts/export.ts     CSV export CLI
 ```

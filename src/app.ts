@@ -1,22 +1,20 @@
 import type { APIGatewayProxyEventV2 } from 'aws-lambda';
 import { ZodError } from 'zod';
 import type { Config } from './config.js';
-import { capture, CaptureError } from './domain/feedback.js';
+import { capture, type CaptureDeps } from './domain/feedback.js';
 import { REF_PATTERN, newRef } from './domain/ref.js';
-import type { BlobStore, FeedbackRepo } from './domain/repo.js';
 import { FeedbackInput } from './domain/schema.js';
-import { githubTransition, verifyGithubSignature } from './domain/webhook.js';
+import { statusOf } from './domain/status.js';
+import { handleGithubEvent, verifyGithubSignature } from './domain/webhook.js';
 import { isHoneypotTripped } from './guards/honeypot.js';
 import type { RateLimiter } from './guards/rateLimit.js';
 import type { TurnstileVerify } from './guards/turnstile.js';
 import { clientIp, corsHeaders, error, header, isForm, json, parseBody, redirect, type Res } from './http.js';
 import { log } from './log.js';
 
-/** Everything the HTTP app needs, injected — so tests build it with memory implementations. */
-export interface AppDeps {
+/** Everything the HTTP app needs, injected — tests build it with in-memory adapters. */
+export interface AppDeps extends CaptureDeps {
   cfg: Config;
-  repo: FeedbackRepo;
-  blobs?: BlobStore;
   rateLimiter: RateLimiter;
   turnstile?: TurnstileVerify;
   isEnabled: () => Promise<boolean>;
@@ -31,7 +29,6 @@ export function createApp(deps: AppDeps): (evt: APIGatewayProxyEventV2) => Promi
     const cors = corsHeaders(evt, deps.cfg.allowedOrigins);
     const { method, path } = evt.requestContext.http;
     const withCors = (r: Res): Res => ({ ...r, headers: { ...r.headers, ...cors } });
-
     try {
       if (method === 'OPTIONS') return withCors({ statusCode: 204, headers: {} });
       if (method === 'POST' && POST_FEEDBACK.test(path)) return withCors(await postFeedback(deps, evt));
@@ -49,23 +46,20 @@ export function createApp(deps: AppDeps): (evt: APIGatewayProxyEventV2) => Promi
 }
 
 async function postFeedback(deps: AppDeps, evt: APIGatewayProxyEventV2): Promise<Res> {
+  if (!isForm(evt)) return postFeedbackJson(deps, evt);
   // No-JS path: the /feedback/ page posts a form; answer with a redirect back to it instead of JSON.
-  if (isForm(evt)) {
-    const res = await postFeedbackJson(deps, evt);
-    const page = `${deps.cfg.SITE_URL}/feedback/`;
-    const body = JSON.parse(res.body ?? '{}') as { ref?: string; error?: { message?: string; details?: Array<{ path: string; message: string }> } };
-    if (body.ref) return redirect(`${page}?sent=1&ref=${body.ref}`);
-    const msg = body.error?.details?.map((d) => `${d.path}: ${d.message}`).join('; ') ?? body.error?.message ?? 'unknown error';
-    return redirect(`${page}?error=${encodeURIComponent(msg)}`);
-  }
-  return postFeedbackJson(deps, evt);
+  const res = await postFeedbackJson(deps, evt);
+  const page = `${deps.cfg.SITE_URL}/feedback/`;
+  const body = JSON.parse(res.body ?? '{}') as { ref?: string; error?: { message?: string; details?: Array<{ path: string; message: string }> } };
+  if (body.ref) return redirect(`${page}?sent=1&ref=${body.ref}`);
+  const msg = body.error?.details?.map((d) => `${d.path}: ${d.message}`).join('; ') ?? body.error?.message ?? 'unknown error';
+  return redirect(`${page}?error=${encodeURIComponent(msg)}`);
 }
 
 async function postFeedbackJson(deps: AppDeps, evt: APIGatewayProxyEventV2): Promise<Res> {
   if (!(await deps.isEnabled())) return error(503, 'ffrs_disabled', 'feedback is temporarily disabled');
-
   const ip = clientIp(evt);
-  if (!deps.rateLimiter.allow(ip)) return error(429, 'rate_limited', 'too many submissions, try again in a minute', undefined);
+  if (!deps.rateLimiter.allow(ip)) return error(429, 'rate_limited', 'too many submissions, try again in a minute');
 
   let input: FeedbackInput;
   try {
@@ -75,68 +69,40 @@ async function postFeedbackJson(deps: AppDeps, evt: APIGatewayProxyEventV2): Pro
     if (err instanceof SyntaxError) return error(400, 'invalid_json', 'body must be JSON');
     throw err;
   }
-
-  // Bots get a convincing 202 and nothing is stored.
-  if (isHoneypotTripped(input)) {
-    log('info', 'honeypot', { ip_hash: ip.length }); // never log the IP itself
-    return json(202, { ref: newRef(), status: 'received' });
-  }
-
+  if (isHoneypotTripped(input)) { log('info', 'honeypot', {}); return json(202, { ref: newRef(), status: 'received' }); } // bots get a convincing 202
   if (deps.turnstile) {
     if (!input.turnstileToken) return error(400, 'turnstile_required', 'missing turnstile token');
     if (!(await deps.turnstile(input.turnstileToken, ip))) return error(403, 'turnstile_failed', 'human verification failed');
   }
 
+  const idem = header(evt, 'idempotency-key'), ua = header(evt, 'user-agent');
   try {
-    const idem = header(evt, 'idempotency-key');
-    const result = await capture({ repo: deps.repo, ...(deps.blobs ? { blobs: deps.blobs } : {}) }, input, {
-      ...(idem ? { idempotencyKey: idem } : {}),
-      ...(header(evt, 'user-agent') ? { userAgent: header(evt, 'user-agent')! } : {}),
-    });
-    log('info', result.created ? 'captured' : 'idempotent_replay', { ref: result.ref, kind: input.kind, screenshot: Boolean(input.screenshot) });
-    return json(result.created ? 202 : 200, { ref: result.ref, status: 'received' });
+    const r = await capture(deps, input, { ...(idem ? { idempotencyKey: idem } : {}), ...(ua ? { userAgent: ua } : {}) });
+    log('info', r.created ? 'captured' : 'idempotent_replay', { ref: r.ref, kind: input.kind, screenshot: Boolean(input.screenshot), issue: r.issueUrl });
+    return json(r.created ? 202 : 200, { ref: r.ref, status: 'received' });
   } catch (err) {
-    if (err instanceof CaptureError) return error(400, err.code, err.message);
-    throw err;
+    // GitHub is the store: if it is down we cannot accept — say so honestly; the widget retries with the same key.
+    log('error', 'capture_failed', { err: String(err) });
+    return error(502, 'route_failed', 'could not file your feedback right now — please retry in a minute');
   }
 }
 
 async function getFeedback(deps: AppDeps, ref: string): Promise<Res> {
   if (!REF_PATTERN.test(ref)) return error(404, 'not_found', 'unknown reference');
-  const row = await deps.repo.findByRef(ref);
-  if (!row) return error(404, 'not_found', 'unknown reference');
-  // Public view: status timeline only — never body, email or screenshot.
-  return json(200, {
-    ref: row.ref,
-    kind: row.kind,
-    status: row.status,
-    outcome: row.outcome,
-    githubIssueUrl: row.githubIssueUrl,
-    createdAt: row.createdAt,
-    acknowledgedAt: row.acknowledgedAt,
-    routedAt: row.routedAt,
-    respondedAt: row.respondedAt,
-    closedAt: row.closedAt,
-  });
+  const s = await deps.store.getSidecar(ref);
+  const view = s ? await statusOf(deps.tracker, s) : undefined;
+  return view ? json(200, view) : error(404, 'not_found', 'unknown reference');
 }
 
 async function githubWebhook(deps: AppDeps, evt: APIGatewayProxyEventV2, secret: string): Promise<Res> {
   const raw = evt.isBase64Encoded ? Buffer.from(evt.body ?? '', 'base64').toString('utf8') : (evt.body ?? '');
   if (!verifyGithubSignature(secret, raw, header(evt, 'x-hub-signature-256'))) return error(401, 'bad_signature', 'signature mismatch');
-  const event = header(evt, 'x-github-event') ?? '';
-  let t;
   try {
-    t = githubTransition(event, JSON.parse(raw), new Date());
+    const out = await handleGithubEvent(deps, header(evt, 'x-github-event') ?? '', JSON.parse(raw));
+    log('info', 'webhook', out);
+    return json(200, out);
   } catch (err) {
     if (err instanceof ZodError || err instanceof SyntaxError) return error(400, 'invalid_payload', 'unrecognised webhook payload');
     throw err;
   }
-  if (!t) return json(200, { ignored: true });
-  const row = await deps.repo.findByIssueUrl(t.issueUrl);
-  if (!row) return json(200, { ignored: true, reason: 'not an FFRS issue' });
-  const patch = t.patch(row);
-  const effects = t.effects(row);
-  await deps.repo.update(row.id, patch, effects);
-  log('info', 'webhook_applied', { ref: row.ref, event, patch: Object.keys(patch), effects });
-  return json(200, { ref: row.ref, ...patch });
 }

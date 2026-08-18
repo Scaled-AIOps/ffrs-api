@@ -1,55 +1,59 @@
-import type { FeedbackRow } from '../db/schema.js';
+import type { IssueView, Kind, Tracker } from './ports.js';
+import { deriveOutcome, kindOf } from './status.js';
 
-/** One row per (kind, ISO week) — mirrors the `ffrs_metrics` SQL view; durations in seconds, null when no data. */
+/** One item as the metrics see it — everything derived from the GitHub issue, nothing personal. */
+export interface Item {
+  ref: string | null; kind: Kind; severity: string | null; outcome: string | null; spam: boolean;
+  createdAt: Date; respondedAt: Date | null; closedAt: Date | null; issueUrl: string;
+}
+
+/** One row per (kind, ISO week); durations in seconds, null when no data. */
 export interface MetricsRow {
-  kind: FeedbackRow['kind'];
-  week: string;            // YYYY-MM-DD (Monday)
-  n: number;
-  ttaP50: number | null;   // acknowledge
-  ttrP50: number | null;   // route
-  ttfrP50: number | null;  // first human response
-  ttfrP90: number | null;
-  ttcP50: number | null;   // close
-  loopClosure: number | null;
-  signalRatio: number | null;
+  kind: Kind; week: string; n: number;
+  ttfrP50: number | null; ttfrP90: number | null; ttcP50: number | null;
+  loopClosure: number | null; signalRatio: number | null;
 }
 
-/** Anonymised per-item export for the paper: no body, email or screenshot; page path only. */
-export interface ExportRow {
-  ref: string; kind: string; severity: string | null; status: string; outcome: string | null;
-  pagePath: string | null; hasEmail: boolean; hasScreenshot: boolean;
-  createdAt: string; acknowledgedAt: string | null; routedAt: string | null; respondedAt: string | null; closedAt: string | null;
-}
+const REF = /<!--\s*ffrs:(FB-[A-Z0-9]{6})\s*-->/;
 
-export function toExportRow(r: FeedbackRow): ExportRow {
-  return {
-    ref: r.ref, kind: r.kind, severity: r.severity, status: r.status, outcome: r.outcome,
-    pagePath: r.pageUrl ? safePath(r.pageUrl) : null, hasEmail: r.email !== null, hasScreenshot: r.screenshotKey !== null,
-    createdAt: r.createdAt.toISOString(), acknowledgedAt: iso(r.acknowledgedAt), routedAt: iso(r.routedAt), respondedAt: iso(r.respondedAt), closedAt: iso(r.closedAt),
-  };
-}
-
-/** Pure TS aggregation with the same semantics as the SQL view — used by memoryRepo and to cross-check Neon. */
-export function aggregate(rows: FeedbackRow[]): MetricsRow[] {
-  const groups = new Map<string, FeedbackRow[]>();
-  for (const r of rows) {
-    const k = `${r.kind}|${mondayOf(r.createdAt)}`;
-    groups.set(k, [...(groups.get(k) ?? []), r]);
+export async function collectItems(tracker: Tracker): Promise<Item[]> {
+  const out: Item[] = [];
+  for (const issue of await tracker.listIssues()) {
+    const kind = kindOf(issue);
+    if (!kind) continue;
+    out.push({
+      ref: REF.exec(issue.body)?.[1] ?? null, kind,
+      severity: issue.labels.find((l) => l.startsWith('severity:'))?.slice(9) ?? null,
+      outcome: issue.state === 'closed' ? deriveOutcome(kind, issue) : null,
+      spam: issue.labels.includes('spam') || issue.labels.includes('outcome:duplicate') || issue.stateReason === 'duplicate',
+      createdAt: issue.createdAt, respondedAt: issue.comments > 0 ? await tracker.firstHumanCommentAt(issue.number) : null,
+      closedAt: issue.closedAt, issueUrl: issue.url,
+    });
   }
+  return out;
+}
+
+export function aggregate(items: Item[]): MetricsRow[] {
+  const groups = new Map<string, Item[]>();
+  for (const it of items) { const k = `${it.kind}|${mondayOf(it.createdAt)}`; groups.set(k, [...(groups.get(k) ?? []), it]); }
   return [...groups.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([k, g]) => {
-    const [kind, week] = k.split('|') as [FeedbackRow['kind'], string];
-    const d = (f: (r: FeedbackRow) => Date | null) => g.map((r) => { const t = f(r); return t ? (t.getTime() - r.createdAt.getTime()) / 1000 : null; }).filter((x): x is number => x !== null);
-    const ratio = (pred: (r: FeedbackRow) => boolean) => g.filter(pred).length / g.length;
+    const [kind, week] = k.split('|') as [Kind, string];
+    const d = (f: (i: Item) => Date | null) => g.map((i) => { const t = f(i); return t ? (t.getTime() - i.createdAt.getTime()) / 1000 : null; }).filter((x): x is number => x !== null);
+    const ratio = (p: (i: Item) => boolean) => g.filter(p).length / g.length;
     return {
       kind, week, n: g.length,
-      ttaP50: pct(d((r) => r.acknowledgedAt), 0.5), ttrP50: pct(d((r) => r.routedAt), 0.5),
-      ttfrP50: pct(d((r) => r.respondedAt), 0.5), ttfrP90: pct(d((r) => r.respondedAt), 0.9), ttcP50: pct(d((r) => r.closedAt), 0.5),
-      loopClosure: ratio((r) => r.closedAt !== null), signalRatio: ratio((r) => r.status !== 'spam' && r.status !== 'duplicate'),
+      ttfrP50: pct(d((i) => i.respondedAt), 0.5), ttfrP90: pct(d((i) => i.respondedAt), 0.9), ttcP50: pct(d((i) => i.closedAt), 0.5),
+      loopClosure: ratio((i) => i.closedAt !== null), signalRatio: ratio((i) => !i.spam),
     };
   });
 }
 
-/** Linear-interpolated percentile, like percentile_cont. */
+/** Anonymised export row for the paper. */
+export function toExportRow(i: Item) {
+  return { ref: i.ref, kind: i.kind, severity: i.severity, outcome: i.outcome, spam: i.spam, createdAt: i.createdAt.toISOString(), respondedAt: i.respondedAt?.toISOString() ?? null, closedAt: i.closedAt?.toISOString() ?? null, issueUrl: i.issueUrl };
+}
+
+/** Linear-interpolated percentile (like percentile_cont). */
 export function pct(xs: number[], p: number): number | null {
   if (!xs.length) return null;
   const s = [...xs].sort((a, b) => a - b);
@@ -62,6 +66,3 @@ export function mondayOf(d: Date): string {
   x.setUTCDate(x.getUTCDate() - ((x.getUTCDay() + 6) % 7));
   return x.toISOString().slice(0, 10);
 }
-
-const iso = (d: Date | null) => (d ? d.toISOString() : null);
-const safePath = (u: string) => { try { return new URL(u).pathname; } catch { return null; } };

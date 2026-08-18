@@ -1,46 +1,43 @@
 import type { APIGatewayProxyEventV2, Context } from 'aws-lambda';
+import { githubTracker } from './adapters/githubTracker.js';
+import { s3Store } from './adapters/s3Store.js';
 import { createApp } from './app.js';
 import { loadSecretsFromSsm } from './bootstrap.js';
 import { isEnabled, loadConfig } from './config.js';
-import { neonRepo } from './db/neonRepo.js';
-import { s3Blobs } from './db/s3Blobs.js';
-import { buildEffects } from './effects/index.js';
-import type { EffectRegistry } from './effects/types.js';
+import { sesMailer } from './effects/mailer.js';
 import { RateLimiter } from './guards/rateLimit.js';
 import { turnstileVerifier } from './guards/turnstile.js';
 import { log } from './log.js';
-import { drainOutbox } from './outbox.js';
 import { runWeeklyReport } from './reports/run.js';
 
-interface Wiring { app: ReturnType<typeof createApp>; repo: ReturnType<typeof neonRepo>; effects: EffectRegistry; cfg: ReturnType<typeof loadConfig> }
-/** EventBridge targets pass `{ job }` as their input. */
-type JobEvent = { job: 'drain_outbox' | 'weekly_report' };
+/** EventBridge passes `{ job }` as target input. */
+type JobEvent = { job: 'weekly_report' };
+interface Wiring { app: ReturnType<typeof createApp>; weekly: () => Promise<unknown> }
 let wiring: Promise<Wiring> | undefined;
 
 // Cold-start wiring, once per instance. Fails fast on bad config — a mis-deployed Lambda must not serve requests.
 async function init(): Promise<Wiring> {
   if (process.env['SSM_PREFIX']) await loadSecretsFromSsm(process.env['SSM_PREFIX']);
   const cfg = loadConfig();
-  const repo = neonRepo(cfg.DATABASE_URL);
-  const blobs = cfg.SCREENSHOT_BUCKET ? s3Blobs(cfg.SCREENSHOT_BUCKET) : undefined;
+  const tracker = githubTracker(cfg.GITHUB_REPO, cfg.GITHUB_TOKEN);
+  const store = s3Store(cfg.DATA_BUCKET);
+  const branding = { siteName: cfg.SITE_NAME, siteUrl: cfg.SITE_URL };
+  const mailer = cfg.FROM_EMAIL ? sesMailer(cfg.FROM_EMAIL) : undefined;
   const turnstile = cfg.TURNSTILE_SECRET ? turnstileVerifier(cfg.TURNSTILE_SECRET) : undefined;
+  if (!mailer) log('warn', 'email_disabled', { hint: 'set FROM_EMAIL to enable ack/alert/close emails' });
   if (!turnstile) log('warn', 'turnstile_disabled', { hint: 'set /ffrs/turnstile_secret in SSM' });
   const app = createApp({
-    cfg,
-    repo,
-    ...(blobs ? { blobs } : {}),
+    cfg, tracker, store, branding,
+    ...(mailer ? { mailer } : {}), ...(cfg.ALERT_EMAIL ? { alertTo: cfg.ALERT_EMAIL } : {}), ...(turnstile ? { turnstile } : {}),
     rateLimiter: new RateLimiter(cfg.RATE_LIMIT_PER_MIN),
-    ...(turnstile ? { turnstile } : {}),
     isEnabled: () => isEnabled(cfg),
   });
-  return { app, repo, effects: buildEffects(cfg, blobs ? { blobs } : {}), cfg };
+  return { app, weekly: () => runWeeklyReport(tracker, cfg) };
 }
 
 export async function handler(event: APIGatewayProxyEventV2 | JobEvent, _ctx: Context) {
-  const { app, repo, effects, cfg } = await (wiring ??= init().catch((e) => { wiring = undefined; throw e; }));
-  if ('requestContext' in event) return app(event);
-  if (event.job === 'weekly_report') return runWeeklyReport(repo, cfg);
-  const result = await drainOutbox(repo, effects);
-  log('info', 'outbox_drained', result);
-  return result;
+  const w = await (wiring ??= init().catch((e) => { wiring = undefined; throw e; }));
+  if ('requestContext' in event) return w.app(event);
+  if (event.job === 'weekly_report') return w.weekly();
+  throw new Error(`unknown job ${String((event as { job?: string }).job)}`);
 }

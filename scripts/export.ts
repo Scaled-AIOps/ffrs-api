@@ -1,15 +1,14 @@
 /**
- * Paper data export. Usage:
- *   DATABASE_URL=… npm run export   > feedback.csv     (anonymised per-item rows)
- *   DATABASE_URL=… npm run metrics  > metrics.csv      (weekly ffrs_metrics view)
- * Nothing personal leaves the database: no body, email or screenshot.
+ * Paper data export straight from GitHub. Usage:
+ *   GITHUB_TOKEN=… GITHUB_REPO=Scaled-AIOps/feedback npm run export  > feedback.csv   (anonymised per-item rows)
+ *   GITHUB_TOKEN=… GITHUB_REPO=Scaled-AIOps/feedback npm run metrics > metrics.csv    (per kind × week)
  */
-import { neonRepo } from '../src/db/neonRepo.js';
+import { githubTracker } from '../src/adapters/githubTracker.js';
 import { toCsv } from '../src/domain/csv.js';
+import { aggregate, collectItems, toExportRow } from '../src/domain/metrics.js';
 
-const url = process.env['DATABASE_URL'];
-if (!url) { console.error('DATABASE_URL is required'); process.exit(2); }
-const repo = neonRepo(url);
-const which = process.argv[2] === 'metrics' ? 'metrics' : 'export';
-const rows = which === 'metrics' ? await repo.metrics() : await repo.exportAll();
+const token = process.env['GITHUB_TOKEN'], repo = process.env['GITHUB_REPO'];
+if (!token || !repo) { console.error('GITHUB_TOKEN and GITHUB_REPO are required'); process.exit(2); }
+const items = await collectItems(githubTracker(repo, token));
+const rows = process.argv[2] === 'metrics' ? aggregate(items) : items.map(toExportRow);
 process.stdout.write(toCsv(rows as unknown as Array<Record<string, unknown>>));

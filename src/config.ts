@@ -1,21 +1,19 @@
 import { z } from 'zod';
 
 const Env = z.object({
-  DATABASE_URL: z.string().url(),
   SITE_NAME: z.string().min(1),
   ALLOWED_ORIGINS: z.string().default(''), // comma-separated; empty = same-origin only
   TURNSTILE_SECRET: z.string().min(1).optional(), // absent = guard off (logged at startup)
-  SCREENSHOT_BUCKET: z.string().min(1).optional(), // absent = screenshots rejected
+  DATA_BUCKET: z.string().min(1), // private S3 bucket: sidecars, idempotency map, screenshots
   SSM_PREFIX: z.string().optional(), // e.g. /ffrs — enables the runtime kill switch
   FFRS_ENABLED: z.enum(['true', 'false']).default('true'),
   RATE_LIMIT_PER_MIN: z.coerce.number().int().positive().default(5),
-  // Effects (Phase 3). Each effect registers only when its settings are present.
   SITE_URL: z.string().url().default('https://www.scaledaiops.org'),
-  FROM_EMAIL: z.string().email().optional(),
-  ALERT_EMAIL: z.string().email().optional(),
-  GITHUB_REPO: z.string().regex(/^[\w.-]+\/[\w.-]+$/, 'owner/repo').optional(),
-  GITHUB_TOKEN: z.string().min(1).optional(),
+  GITHUB_REPO: z.string().regex(/^[\w.-]+\/[\w.-]+$/, 'owner/repo'), // system of record
+  GITHUB_TOKEN: z.string().min(1),
   GITHUB_WEBHOOK_SECRET: z.string().min(1).optional(), // absent = webhook route disabled (404)
+  FROM_EMAIL: z.string().email().optional(),           // absent = no emails at all
+  ALERT_EMAIL: z.string().email().optional(),
 });
 export type Config = z.infer<typeof Env> & { allowedOrigins: string[] };
 

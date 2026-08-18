@@ -1,65 +1,47 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { z } from 'zod';
-import type { FeedbackRow } from '../db/schema.js';
-import type { EffectType, FeedbackPatch } from './repo.js';
+import type { Mailer } from '../effects/mailer.js';
+import { closeMail, type Branding } from '../effects/templates.js';
+import { log } from '../log.js';
+import type { Store } from './ports.js';
+import { deriveOutcome } from './status.js';
 
-/** GitHub → FFRS stage transitions (Respond, Close, and re-open). Pure: no I/O. */
-
-const Issue = z.object({
-  html_url: z.string().url(),
-  state_reason: z.enum(['completed', 'not_planned', 'duplicate', 'reopened']).nullable().optional(),
-  labels: z.array(z.object({ name: z.string() })).default([]),
-});
-export const IssuesEvent = z.object({ action: z.string(), issue: Issue });
-export const IssueCommentEvent = z.object({
+/**
+ * Loop closure. GitHub already records comments and close time; the webhook's only job is the closing email
+ * (the one thing GitHub can't do because the address lives in the private sidecar).
+ */
+export const IssuesEvent = z.object({
   action: z.string(),
-  issue: Issue,
-  comment: z.object({ user: z.object({ type: z.string(), login: z.string() }) }),
+  issue: z.object({
+    number: z.number(), html_url: z.string().url(), body: z.string().nullable().default(''),
+    state_reason: z.enum(['completed', 'not_planned', 'duplicate', 'reopened']).nullable().optional(),
+    labels: z.array(z.object({ name: z.string() })).default([]),
+  }),
 });
+const REF = /<!--\s*ffrs:(FB-[A-Z0-9]{6})\s*-->/;
 
-export type Outcome = NonNullable<FeedbackRow['outcome']>;
-const OUTCOMES: Outcome[] = ['fixed', 'shipped', 'answered', 'declined', 'wontfix', 'duplicate'];
-const DEFAULT_COMPLETED: Record<FeedbackRow['kind'], Outcome> = { bug: 'fixed', feature: 'shipped', contact: 'answered' };
-
-/** `outcome:<x>` label wins; otherwise infer from GitHub's state_reason and the feedback kind. */
-export function deriveOutcome(kind: FeedbackRow['kind'], issue: z.infer<typeof Issue>): Outcome {
-  for (const l of issue.labels) {
-    const m = /^outcome:(\w+)$/.exec(l.name);
-    if (m && (OUTCOMES as string[]).includes(m[1]!)) return m[1] as Outcome;
+export async function handleGithubEvent(
+  deps: { store: Store; branding: Branding; mailer?: Mailer },
+  event: string, payload: unknown, now = new Date(),
+): Promise<{ ref?: string; action: string; emailed: boolean }> {
+  if (event !== 'issues') return { action: 'ignored', emailed: false };
+  const e = IssuesEvent.parse(payload);
+  const ref = REF.exec(e.issue.body ?? '')?.[1];
+  if (!ref) return { action: 'ignored', emailed: false }; // not an FFRS issue
+  const s = await deps.store.getSidecar(ref);
+  if (!s) return { ref, action: 'ignored', emailed: false };
+  if (e.action === 'closed' && s.email && deps.mailer && !s.closeEmailAt) {
+    const outcome = deriveOutcome(s.kind, { labels: e.issue.labels.map((l) => l.name), stateReason: e.issue.state_reason ?? null });
+    await deps.mailer(closeMail(deps.branding, s, outcome));
+    await deps.store.putSidecar({ ...s, closeEmailAt: now.toISOString() });
+    log('info', 'close_email_sent', { ref, outcome });
+    return { ref, action: 'closed', emailed: true };
   }
-  if (issue.state_reason === 'not_planned') return 'declined';
-  if (issue.state_reason === 'duplicate') return 'duplicate';
-  return DEFAULT_COMPLETED[kind];
-}
-
-export interface Transition { issueUrl: string; patch: (row: FeedbackRow) => FeedbackPatch; effects: (row: FeedbackRow) => EffectType[] }
-
-/** Map a verified event to a transition, or null if the event is irrelevant. */
-export function githubTransition(event: string, payload: unknown, now: Date): Transition | null {
-  if (event === 'issues') {
-    const e = IssuesEvent.parse(payload);
-    if (e.action === 'closed') {
-      return {
-        issueUrl: e.issue.html_url,
-        patch: (row) => ({ status: 'closed', outcome: deriveOutcome(row.kind, e.issue), closedAt: row.closedAt ?? now, respondedAt: row.respondedAt ?? now }),
-        effects: (row) => (row.email ? ['close_email'] : []),
-      };
-    }
-    if (e.action === 'reopened') {
-      return { issueUrl: e.issue.html_url, patch: () => ({ status: 'routed', outcome: null, closedAt: null }), effects: () => [] };
-    }
-    return null;
+  if (e.action === 'reopened' && s.closeEmailAt) {
+    await deps.store.putSidecar({ ...s, closeEmailAt: null }); // allow a fresh closing email later
+    return { ref, action: 'reopened', emailed: false };
   }
-  if (event === 'issue_comment') {
-    const e = IssueCommentEvent.parse(payload);
-    if (e.action !== 'created' || e.comment.user.type !== 'User') return null; // bots don't count as a response
-    return {
-      issueUrl: e.issue.html_url,
-      patch: (row) => ({ respondedAt: row.respondedAt ?? now, ...(row.status === 'routed' || row.status === 'new' ? { status: 'responded' as const } : {}) }),
-      effects: () => [],
-    };
-  }
-  return null;
+  return { ref, action: e.action, emailed: false };
 }
 
 export function verifyGithubSignature(secret: string, rawBody: string, signatureHeader: string | undefined): boolean {
