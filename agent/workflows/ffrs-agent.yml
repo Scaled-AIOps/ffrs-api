@@ -1,12 +1,21 @@
 # Copy to <tracker repo>/.github/workflows/ffrs-agent.yml
 name: FFRS agent
 on:
-  schedule: [{ cron: '*/30 * * * *' }]
+  schedule:
+    - cron: '*/30 * * * *'
   workflow_dispatch:
-    inputs: { max_items: { description: 'Max issues per run', default: '3' } }
-  issue_comment: { types: [created] }
-permissions: { issues: write, contents: read }
-concurrency: { group: ffrs-agent, cancel-in-progress: false }
+    inputs:
+      max_items:
+        description: 'Max issues per run'
+        default: '3'
+  issue_comment:
+    types: [created]
+permissions:
+  issues: write
+  contents: read
+concurrency:
+  group: ffrs-agent
+  cancel-in-progress: false
 env:
   TRACKER_REPO: ${{ github.repository }}
   TARGET_REPO: Scaled-AIOps/scaledaiops.org
@@ -22,27 +31,41 @@ jobs:
     steps:
       - name: Handle /accept and /reject
         if: github.event_name == 'issue_comment' && !contains(github.event.comment.body, '/confirm')
-        env: { GH_TOKEN: ${{ github.token }} }
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BODY: ${{ github.event.comment.body }}
+          NUMBER: ${{ github.event.issue.number }}
         run: |
           set -euo pipefail
-          B="${{ github.event.comment.body }}"
-          case "$B" in *"/accept"*) gh issue edit ${{ github.event.issue.number }} --repo "$TRACKER_REPO" --add-label requester:accepted;; esac
-          case "$B" in *"/reject"*) gh issue edit ${{ github.event.issue.number }} --repo "$TRACKER_REPO" --add-label agent:rejected --remove-label agent:proposal;; esac
+          case "$BODY" in *"/accept"*) gh issue edit "$NUMBER" --repo "$TRACKER_REPO" --add-label requester:accepted;; esac
+          case "$BODY" in *"/reject"*) gh issue edit "$NUMBER" --repo "$TRACKER_REPO" --add-label agent:rejected --remove-label agent:proposal;; esac
           echo "handled=1" >> "$GITHUB_ENV"
-      - if: env.handled != '1'
+      - name: Checkout ffrs-api (agent runner)
+        if: env.handled != '1'
         uses: actions/checkout@v4
-        with: { repository: Scaled-AIOps/ffrs-api, path: ffrs-api }
-      - if: env.handled != '1'
+        with:
+          repository: Scaled-AIOps/ffrs-api
+          path: ffrs-api
+      - name: Checkout target repo
+        if: env.handled != '1'
         uses: actions/checkout@v4
-        with: { repository: ${{ env.TARGET_REPO }}, path: target, token: ${{ secrets.FFRS_AGENT_TOKEN }}, fetch-depth: 0 }
-      - if: env.handled != '1'
+        with:
+          repository: ${{ env.TARGET_REPO }}
+          path: target
+          token: ${{ secrets.FFRS_AGENT_TOKEN }}
+          fetch-depth: 0
+      - name: Node
+        if: env.handled != '1'
         uses: actions/setup-node@v4
-        with: { node-version: 22 }
-      - if: env.handled != '1'
+        with:
+          node-version: 22
+      - name: Install Claude Code and target deps
+        if: env.handled != '1'
         run: |
           npm i -g @anthropic-ai/claude-code
           cd target && npm ci && npx playwright install --with-deps chromium
-      - if: env.handled != '1'
+      - name: Run FFRS agent
+        if: env.handled != '1'
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           GITHUB_TOKEN: ${{ github.token }}
