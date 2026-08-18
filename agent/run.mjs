@@ -45,7 +45,7 @@ function runAgent(issue) {
   const r = spawnSync('claude', ['-p', prompt, '--output-format', 'json', '--max-turns', '60',
     '--allowedTools', 'Read,Glob,Grep,Edit,Write,Bash(./build.sh),Bash(npm run test:local),Bash(npm run build),Bash(ls*),Bash(cat*)'],
     { cwd: DIR, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, env: process.env });
-  if (r.status !== 0) throw new Error(`claude exited ${r.status}: stderr=${(r.stderr || '').slice(-800)} stdout=${(r.stdout || '').slice(-800)}`);
+  if (r.status !== 0) throw new Error(`claude exited ${r.status}: stderr=${(r.stderr || '').slice(-800)} stdout=${(r.stdout || '').slice(0, 1200)}`);
   const out = JSON.parse(r.stdout);
   const text = typeof out.result === 'string' ? out.result : JSON.stringify(out);
   const line = text.trim().split('\n').reverse().find((l) => l.trim().startsWith('{'));
