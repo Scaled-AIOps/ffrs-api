@@ -1,14 +1,13 @@
-import { z } from 'zod';
 import type { Config } from '../config.js';
 import type { BlobStore } from '../domain/repo.js';
 import { log } from '../log.js';
+import { githubClient } from './github.js';
 import type { Mailer } from './mailer.js';
 import { sesMailer } from './mailer.js';
 import { ackMail, alertMail, closeMail, issueBody, type Branding } from './templates.js';
 import type { Effect, EffectRegistry } from './types.js';
 
 const SCREENSHOT_LINK_TTL_S = 7 * 24 * 3600;
-const IssueCreated = z.object({ html_url: z.string().url() });
 
 export const ackEmail = (b: Branding, mail: Mailer): Effect => async (f) => {
   if (!f.email) return; // consent withdrawn or anonymous — nothing to send
@@ -26,13 +25,7 @@ export const alertEmail = (b: Branding, mail: Mailer, to: string): Effect => asy
 
 export const githubIssue = (b: Branding, repo: string, token: string, blobs?: BlobStore, fetchImpl: typeof fetch = fetch): Effect => async (f) => {
   const shot = f.screenshotKey && blobs ? await blobs.url(f.screenshotKey, SCREENSHOT_LINK_TTL_S) : undefined;
-  const res = await fetchImpl(`https://api.github.com/repos/${repo}/issues`, {
-    method: 'POST',
-    headers: { authorization: `Bearer ${token}`, accept: 'application/vnd.github+json', 'content-type': 'application/json', 'user-agent': 'ffrs-api' },
-    body: JSON.stringify(issueBody(b, f, shot)),
-  });
-  if (!res.ok) throw new Error(`github issues HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`);
-  return { githubIssueUrl: IssueCreated.parse(await res.json()).html_url };
+  return { githubIssueUrl: await githubClient(repo, token, fetchImpl).createIssue(issueBody(b, f, shot)) };
 };
 
 /** Wire effects from config. Missing settings → effect absent (outbox parks its rows) and a warning at startup. */

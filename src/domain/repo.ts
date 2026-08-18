@@ -1,4 +1,5 @@
 import type { FeedbackRow, NewFeedback, SideEffectRow } from '../db/schema.js';
+import type { ExportRow, MetricsRow } from './metrics.js';
 
 export type EffectType = 'ack_email' | 'github_issue' | 'alert_email' | 'close_email';
 export type FeedbackPatch = Partial<Pick<FeedbackRow, 'acknowledgedAt' | 'routedAt' | 'respondedAt' | 'closedAt' | 'githubIssueUrl' | 'status' | 'outcome'>>;
@@ -16,6 +17,10 @@ export interface FeedbackRepo {
   /** Mark done and apply the effect's outcome to the feedback row (timestamps only set if still null). */
   completeEffect(id: number, now: Date, patch?: FeedbackPatch): Promise<void>;
   failEffect(id: number, error: string, nextTryAt: Date): Promise<void>;
+  /** Weekly FFRS metrics (the `ffrs_metrics` view), oldest first. */
+  metrics(): Promise<MetricsRow[]>;
+  /** Anonymised per-item rows for analysis/export. */
+  exportAll(): Promise<ExportRow[]>;
 }
 
 /** Binary storage for screenshots. S3 in production, in-memory in tests. */

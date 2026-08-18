@@ -1,3 +1,4 @@
+import { aggregate, toExportRow } from '../domain/metrics.js';
 import type { EffectType, FeedbackRepo } from '../domain/repo.js';
 import type { FeedbackRow, SideEffectRow } from './schema.js';
 
@@ -70,5 +71,7 @@ export function memoryRepo(): FeedbackRepo & { rows: FeedbackRow[]; effects: Sid
       const e = effects.find((x) => x.id === id)!;
       e.lastError = error; e.nextTryAt = nextTryAt;
     },
+    async metrics() { return aggregate(rows); },
+    async exportAll() { return rows.map(toExportRow); },
   };
 }

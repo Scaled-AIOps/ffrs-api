@@ -9,7 +9,8 @@ Capture API of the **Fast Feedback Response System** (FFRS) — a Node 22 Lambda
 | `POST /api/feedback` | Capture. Validates (Zod) → guards (rate limit, honeypot, Turnstile) → durable insert + queued side effects → `202 {ref}`. Idempotent on `Idempotency-Key`. |
 | `GET /api/feedback/:ref` | Public status timeline (never body/email/screenshot). |
 | `POST /api/webhooks/github` | Loop closure. HMAC-verified (`X-Hub-Signature-256`). `issues.closed` → `status=closed`, `outcome` (label `outcome:*` > `state_reason` > kind default), `closed_at`, queues `close_email`; `issues.reopened` → back to `routed`; `issue_comment.created` by a human → `responded_at` (first write). Route is 404 unless `GITHUB_WEBHOOK_SECRET` is set. |
-| EventBridge (1 min) | Drains the `side_effects` outbox with backoff (1m→6h, then parked). Effects: `ack_email` (stamps `acknowledged_at`), `github_issue` (stamps `routed_at`, status→routed, stores issue URL), `alert_email`. Missing settings ⇒ effect not registered, rows parked with a startup warning. |
+| EventBridge weekly (Mon 07:00 UTC, `{job:"weekly_report"}`) | Posts last week's FFRS metrics (per kind: n, TTA/TTR/TTFR/TTC percentiles, loop closure, signal ratio) as a GitHub issue labelled `ffrs-report`; logs it when GitHub isn't configured. |
+| EventBridge (1 min, `{job:"drain_outbox"}`) | Drains the `side_effects` outbox with backoff (1m→6h, then parked). Effects: `ack_email` (stamps `acknowledged_at`), `github_issue` (stamps `routed_at`, status→routed, stores issue URL), `alert_email`. Missing settings ⇒ effect not registered, rows parked with a startup warning. |
 
 ## Env
 
@@ -35,6 +36,8 @@ Capture API of the **Fast Feedback Response System** (FFRS) — a Node 22 Lambda
 npm install
 npm run check          # typecheck + vitest + esbuild + zip → dist/handler.zip (what Terraform deploys)
 DATABASE_URL=… npm run db:migrate   # applies drizzle/*.sql incl. the ffrs_metrics view
+DATABASE_URL=… npm run metrics > metrics.csv    # weekly ffrs_metrics view as CSV (paper data)
+DATABASE_URL=… npm run export  > feedback.csv   # anonymised per-item rows: no body, email or screenshot
 ```
 
 Tests use `memoryRepo` — no database needed. `neonRepo` is the production `FeedbackRepo`; both satisfy the same interface (`src/domain/repo.ts`).
@@ -53,5 +56,7 @@ src/db/             drizzle schema, neonRepo, memoryRepo, s3Blobs
 src/guards/         honeypot, rateLimit, turnstile
 src/effects/        Effect plug-ins: ackEmail, alertEmail, githubIssue; SES mailer; templates; buildEffects(cfg)
 src/outbox.ts       claim → run → complete / fail-with-backoff
+src/reports/        weekly report (markdown) + runner; src/domain/metrics.ts is the TS twin of the SQL view
+scripts/export.ts   CSV export CLI
 drizzle/            migrations (0000 schema, 0001 ffrs_metrics view)
 ```

@@ -2,6 +2,7 @@ import { neon } from '@neondatabase/serverless';
 import { eq, isNull, lte, sql } from 'drizzle-orm';
 import { drizzle, type NeonHttpDatabase } from 'drizzle-orm/neon-http';
 import type { EffectType, FeedbackRepo } from '../domain/repo.js';
+import { toExportRow, type MetricsRow } from '../domain/metrics.js';
 import { feedback, sideEffects, type FeedbackRow, type NewFeedback } from './schema.js';
 
 export function neonRepo(databaseUrl: string): FeedbackRepo {
@@ -68,6 +69,26 @@ export function neonRepo(databaseUrl: string): FeedbackRepo {
 
     async failEffect(id, error, nextTryAt) {
       await db.update(sideEffects).set({ lastError: error.slice(0, 2000), nextTryAt }).where(eq(sideEffects.id, id));
+    },
+
+    async metrics() {
+      // Intervals come back as strings; extract_epoch keeps the view generic and the driver simple.
+      const rows = await db.execute<Record<string, string | number | null>>(sql`
+        select kind, to_char(wk, 'YYYY-MM-DD') as week, n,
+          extract(epoch from tta_p50) as tta, extract(epoch from ttr_p50) as ttr,
+          extract(epoch from ttfr_p50) as ttfr50, extract(epoch from ttfr_p90) as ttfr90,
+          extract(epoch from ttc_p50) as ttc, loop_closure, signal_ratio
+        from ffrs_metrics order by wk, kind`);
+      const num = (v: string | number | null | undefined) => (v === null || v === undefined ? null : Number(v));
+      return rows.rows.map((r): MetricsRow => ({
+        kind: r['kind'] as MetricsRow['kind'], week: String(r['week']), n: Number(r['n']),
+        ttaP50: num(r['tta']), ttrP50: num(r['ttr']), ttfrP50: num(r['ttfr50']), ttfrP90: num(r['ttfr90']), ttcP50: num(r['ttc']),
+        loopClosure: num(r['loop_closure']), signalRatio: num(r['signal_ratio']),
+      }));
+    },
+
+    async exportAll() {
+      return (await db.select().from(feedback).orderBy(feedback.createdAt)).map(toExportRow);
     },
   };
 }

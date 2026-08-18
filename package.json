@@ -1,7 +1,7 @@
 {
   "name": "ffrs-api",
   "version": "0.1.0",
-  "description": "Fast Feedback Response System — capture API (Lambda + Neon)",
+  "description": "Fast Feedback Response System \u2014 capture API (Lambda + Neon)",
   "type": "module",
   "license": "MIT",
   "engines": {
@@ -15,7 +15,9 @@
     "package": "npm run build && rm -f dist/handler.zip && cd dist && zip -q handler.zip handler.mjs handler.mjs.map",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
-    "check": "npm run typecheck && npm test && npm run package"
+    "check": "npm run typecheck && npm test && npm run package",
+    "export": "tsx scripts/export.ts export",
+    "metrics": "tsx scripts/export.ts metrics"
   },
   "dependencies": {
     "@aws-sdk/s3-request-presigner": "^3.1112.0",
@@ -32,6 +34,7 @@
     "drizzle-kit": "^0.31.4",
     "esbuild": "^0.25.9",
     "typescript": "^5.9.2",
-    "vitest": "^3.2.4"
+    "vitest": "^3.2.4",
+    "tsx": "^4.20.4"
   }
 }
