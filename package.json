@@ -1,7 +1,7 @@
 {
   "name": "ffrs-api",
   "version": "0.1.0",
-  "description": "Fast Feedback Response System \u2014 capture API (Lambda; GitHub Issues as the record, S3 sidecar)",
+  "description": "Fast Feedback Resolution System \u2014 capture API (Lambda; GitHub Issues as the record, S3 sidecar)",
   "type": "module",
   "license": "MIT",
   "engines": {

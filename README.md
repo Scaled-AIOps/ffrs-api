@@ -1,6 +1,6 @@
 # ffrs-api
 
-Capture API of the **Fast Feedback Response System** (FFRS). Dependency-minimal by design: **GitHub Issues is the system of record**, one Node 22 Lambda routes to it, and a private S3 prefix holds the only personal data (a per-item sidecar with the submitter's email). No database. Reference implementation for scaledaiops.org; reusable by any site via one `<script>` tag (widget) and a handful of env vars. Plan: `scaledaiops.org/docs/ffrs-plan.md`.
+Capture API of the **Fast Feedback Resolution System** (FFRS). Dependency-minimal by design: **GitHub Issues is the system of record**, one Node 22 Lambda routes to it, and a private S3 prefix holds the only personal data (a per-item sidecar with the submitter's email). No database. Reference implementation for scaledaiops.org; reusable by any site via one `<script>` tag (widget) and a handful of env vars. Plan: `scaledaiops.org/docs/ffrs-plan.md`.
 
 ## How the FFRS stages map
 
