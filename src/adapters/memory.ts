@@ -3,7 +3,7 @@ import type { IssueRef, IssueView, NewIssue, Sidecar, Store, Tracker } from '../
 /** In-memory Tracker + Store for tests and local runs. Same contracts, no I/O. */
 export function memoryTracker(now: () => Date = () => new Date()) {
   const issues: IssueView[] = [];
-  const comments = new Map<number, Array<{ at: Date; human: boolean }>>();
+  const comments = new Map<number, Array<{ at: Date; human: boolean }>>(); // human=false for bots and 🤖-prefixed agent comments
   const t: Tracker & { issues: IssueView[]; comment(n: number, at: Date, human?: boolean): void; close(n: number, at: Date, reason?: IssueView['stateReason'], labels?: string[]): void } = {
     issues,
     async createIssue(i: NewIssue): Promise<IssueRef> {

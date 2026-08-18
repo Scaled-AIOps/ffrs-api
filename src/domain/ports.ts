@@ -19,7 +19,7 @@ export interface IssueView extends IssueRef {
 export interface Tracker {
   createIssue(issue: NewIssue): Promise<IssueRef>;
   getIssue(number: number): Promise<IssueView | undefined>;
-  /** First comments: any author (agent responses count) and human only (type User). */
+  /** First comments: any author (agent responses count) and human only (type User and not a 🤖-prefixed agent comment). */
   firstCommentsAt(number: number): Promise<{ any: Date | null; human: Date | null }>;
   /** All FFRS-filed issues (label `ffrs`), oldest first. */
   listIssues(): Promise<IssueView[]>;

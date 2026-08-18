@@ -7,7 +7,9 @@ const Issue = z.object({
   labels: z.array(z.object({ name: z.string() })), comments: z.number(), body: z.string().nullable(),
   pull_request: z.unknown().optional(),
 });
-const Comment = z.object({ created_at: z.string(), user: z.object({ type: z.string() }) });
+const Comment = z.object({ created_at: z.string(), body: z.string().nullable().default(''), user: z.object({ type: z.string() }) });
+/** Agent responses are posted under the routine's GitHub identity; the 🤖 prefix marks them. */
+export const AGENT_MARK = /^\s*(?:🤖|\uD83E\uDD16)/;
 
 const view = (i: z.infer<typeof Issue>): IssueView => ({
   number: i.number, url: i.html_url, createdAt: new Date(i.created_at), closedAt: i.closed_at ? new Date(i.closed_at) : null,
@@ -37,7 +39,7 @@ export function githubTracker(repo: string, token: string, fetchImpl: typeof fet
     async firstCommentsAt(number) {
       const comments = z.array(Comment).parse(await api(`/repos/${repo}/issues/${number}/comments?per_page=100`));
       const at = (c?: z.infer<typeof Comment>) => (c ? new Date(c.created_at) : null);
-      return { any: at(comments[0]), human: at(comments.find((c) => c.user.type === 'User')) };
+      return { any: at(comments[0]), human: at(comments.find((c) => c.user.type === 'User' && !AGENT_MARK.test(c.body ?? ''))) };
     },
     async listIssues() {
       const out: IssueView[] = [];

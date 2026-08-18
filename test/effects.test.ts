@@ -30,3 +30,12 @@ describe('templates', () => {
     expect(i.body).not.toContain('v@example.org');
   });
 });
+
+describe('agent mark', () => {
+  it('🤖-prefixed comments are agent responses, not human', async () => {
+    const { AGENT_MARK } = await import('../src/adapters/githubTracker.js');
+    expect(AGENT_MARK.test('🤖 **FFRS agent — pull request opened:** x')).toBe(true);
+    expect(AGENT_MARK.test('  🤖 skipped')).toBe(true);
+    expect(AGENT_MARK.test('Thanks, merged.')).toBe(false);
+  });
+});
