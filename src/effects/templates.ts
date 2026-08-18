@@ -40,6 +40,29 @@ export function alertMail(b: Branding, f: FeedbackRow, to: string): Mail {
   return { to, subject: `[FFRS] ${f.kind}${f.severity ? `/${f.severity}` : ''}: ${f.title}`, text, html: toHtml(text) };
 }
 
+const OUTCOME_LINE: Record<string, string> = {
+  fixed: 'The bug you reported has been fixed.',
+  shipped: 'The feature you requested has shipped.',
+  answered: 'Your message has been answered.',
+  declined: 'After review, this was declined.',
+  wontfix: 'After review, this will not be changed.',
+  duplicate: 'This was already tracked elsewhere and has been merged into the existing item.',
+};
+
+export function closeMail(b: Branding, f: FeedbackRow): Mail {
+  const line = OUTCOME_LINE[f.outcome ?? ''] ?? 'This item has been closed.';
+  const text = [
+    `Update on your ${KIND_LABEL[f.kind]} ${f.ref}: ${line}`,
+    ``,
+    `Title: ${f.title}`,
+    ...(f.githubIssueUrl ? [`Discussion: ${f.githubIssueUrl}`] : []),
+    `Status: ${statusUrl(b, f.ref)}`,
+    ``,
+    `Thank you for helping improve ${b.siteName}.`,
+  ].join('\n');
+  return { to: f.email!, subject: `[${f.ref}] ${f.outcome ?? 'closed'}: ${f.title}`, text, html: toHtml(text) };
+}
+
 export function issueBody(b: Branding, f: FeedbackRow, screenshotUrl?: string): { title: string; body: string; labels: string[] } {
   const labels = ['ffrs', `kind:${f.kind}`, ...(f.severity ? [`severity:${f.severity}`] : [])];
   const body = [

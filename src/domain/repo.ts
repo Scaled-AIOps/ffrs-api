@@ -1,13 +1,16 @@
 import type { FeedbackRow, NewFeedback, SideEffectRow } from '../db/schema.js';
 
 export type EffectType = 'ack_email' | 'github_issue' | 'alert_email' | 'close_email';
-export type FeedbackPatch = Partial<Pick<FeedbackRow, 'acknowledgedAt' | 'routedAt' | 'githubIssueUrl' | 'status'>>;
+export type FeedbackPatch = Partial<Pick<FeedbackRow, 'acknowledgedAt' | 'routedAt' | 'respondedAt' | 'closedAt' | 'githubIssueUrl' | 'status' | 'outcome'>>;
 
 /** Persistence boundary. Neon in production, in-memory in tests — the domain never sees a driver. */
 export interface FeedbackRepo {
   /** Insert feedback and its outbox rows atomically. Returns the existing row when idempotencyKey matches. */
   create(input: NewFeedback, effects: EffectType[]): Promise<{ row: FeedbackRow; created: boolean }>;
   findByRef(ref: string): Promise<FeedbackRow | undefined>;
+  findByIssueUrl(url: string): Promise<FeedbackRow | undefined>;
+  /** Apply a state transition exactly as given (webhooks) and queue follow-up effects. */
+  update(id: number, patch: FeedbackPatch, effects?: EffectType[]): Promise<void>;
   /** Claim up to `limit` due effects (sets attempts+1) so concurrent drains don't double-send. */
   claimDueEffects(limit: number, now: Date): Promise<Array<SideEffectRow & { feedback: FeedbackRow }>>;
   /** Mark done and apply the effect's outcome to the feedback row (timestamps only set if still null). */

@@ -8,6 +8,7 @@ Capture API of the **Fast Feedback Response System** (FFRS) — a Node 22 Lambda
 |---|---|
 | `POST /api/feedback` | Capture. Validates (Zod) → guards (rate limit, honeypot, Turnstile) → durable insert + queued side effects → `202 {ref}`. Idempotent on `Idempotency-Key`. |
 | `GET /api/feedback/:ref` | Public status timeline (never body/email/screenshot). |
+| `POST /api/webhooks/github` | Loop closure. HMAC-verified (`X-Hub-Signature-256`). `issues.closed` → `status=closed`, `outcome` (label `outcome:*` > `state_reason` > kind default), `closed_at`, queues `close_email`; `issues.reopened` → back to `routed`; `issue_comment.created` by a human → `responded_at` (first write). Route is 404 unless `GITHUB_WEBHOOK_SECRET` is set. |
 | EventBridge (1 min) | Drains the `side_effects` outbox with backoff (1m→6h, then parked). Effects: `ack_email` (stamps `acknowledged_at`), `github_issue` (stamps `routed_at`, status→routed, stores issue URL), `alert_email`. Missing settings ⇒ effect not registered, rows parked with a startup warning. |
 
 ## Env
@@ -25,6 +26,7 @@ Capture API of the **Fast Feedback Response System** (FFRS) — a Node 22 Lambda
 | `SITE_URL` | opt | base for status links in emails/issues (default `https://www.scaledaiops.org`) |
 | `FROM_EMAIL` | effects | SES sender; enables `ack_email` (and `alert_email` with `ALERT_EMAIL`) |
 | `ALERT_EMAIL` | effects | maintainer inbox for new-feedback alerts |
+| `GITHUB_WEBHOOK_SECRET` | loop | SSM `/ffrs/github_webhook_secret`; enables the webhook route |
 | `GITHUB_REPO` + `GITHUB_TOKEN` | effects | `owner/repo` + token (SSM) → enables `github_issue`; screenshot embedded via 7-day presigned URL |
 
 ## Develop
@@ -37,12 +39,16 @@ DATABASE_URL=… npm run db:migrate   # applies drizzle/*.sql incl. the ffrs_met
 
 Tests use `memoryRepo` — no database needed. `neonRepo` is the production `FeedbackRepo`; both satisfy the same interface (`src/domain/repo.ts`).
 
+## GitHub webhook setup (once)
+
+Repo → Settings → Webhooks → Add: Payload URL `https://www.scaledaiops.org/api/webhooks/github`, content type `application/json`, secret = value of SSM `/ffrs/github_webhook_secret`, events **Issues** + **Issue comments**. Optional labels `outcome:fixed|shipped|answered|declined|wontfix|duplicate` override the inferred outcome when closing.
+
 ## Layout
 
 ```
 src/handler.ts      Lambda entry: wires config → repo/blobs/guards → app; schedule → outbox
 src/app.ts          HTTP routing + guards, framework-free
-src/domain/         capture() (FFRS stage 1), Zod input schema, ref generator, repo interfaces
+src/domain/         capture() (stage 1), webhook transitions (stages 4–5), Zod input schema, ref generator, repo interfaces
 src/db/             drizzle schema, neonRepo, memoryRepo, s3Blobs
 src/guards/         honeypot, rateLimit, turnstile
 src/effects/        Effect plug-ins: ackEmail, alertEmail, githubIssue; SES mailer; templates; buildEffects(cfg)

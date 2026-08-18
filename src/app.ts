@@ -5,6 +5,7 @@ import { capture, CaptureError } from './domain/feedback.js';
 import { REF_PATTERN, newRef } from './domain/ref.js';
 import type { BlobStore, FeedbackRepo } from './domain/repo.js';
 import { FeedbackInput } from './domain/schema.js';
+import { githubTransition, verifyGithubSignature } from './domain/webhook.js';
 import { isHoneypotTripped } from './guards/honeypot.js';
 import type { RateLimiter } from './guards/rateLimit.js';
 import type { TurnstileVerify } from './guards/turnstile.js';
@@ -23,6 +24,7 @@ export interface AppDeps {
 
 const POST_FEEDBACK = /^\/api\/feedback\/?$/;
 const GET_FEEDBACK = /^\/api\/feedback\/(FB-[A-Z0-9]{6})\/?$/;
+const GITHUB_WEBHOOK = /^\/api\/webhooks\/github\/?$/;
 
 export function createApp(deps: AppDeps): (evt: APIGatewayProxyEventV2) => Promise<Res> {
   return async (evt) => {
@@ -33,6 +35,7 @@ export function createApp(deps: AppDeps): (evt: APIGatewayProxyEventV2) => Promi
     try {
       if (method === 'OPTIONS') return withCors({ statusCode: 204, headers: {} });
       if (method === 'POST' && POST_FEEDBACK.test(path)) return withCors(await postFeedback(deps, evt));
+      if (method === 'POST' && GITHUB_WEBHOOK.test(path) && deps.cfg.GITHUB_WEBHOOK_SECRET) return githubWebhook(deps, evt, deps.cfg.GITHUB_WEBHOOK_SECRET);
       if (method === 'GET') {
         const ref = GET_FEEDBACK.exec(path)?.[1];
         if (ref) return withCors(await getFeedback(deps, ref));
@@ -115,4 +118,25 @@ async function getFeedback(deps: AppDeps, ref: string): Promise<Res> {
     respondedAt: row.respondedAt,
     closedAt: row.closedAt,
   });
+}
+
+async function githubWebhook(deps: AppDeps, evt: APIGatewayProxyEventV2, secret: string): Promise<Res> {
+  const raw = evt.isBase64Encoded ? Buffer.from(evt.body ?? '', 'base64').toString('utf8') : (evt.body ?? '');
+  if (!verifyGithubSignature(secret, raw, header(evt, 'x-hub-signature-256'))) return error(401, 'bad_signature', 'signature mismatch');
+  const event = header(evt, 'x-github-event') ?? '';
+  let t;
+  try {
+    t = githubTransition(event, JSON.parse(raw), new Date());
+  } catch (err) {
+    if (err instanceof ZodError || err instanceof SyntaxError) return error(400, 'invalid_payload', 'unrecognised webhook payload');
+    throw err;
+  }
+  if (!t) return json(200, { ignored: true });
+  const row = await deps.repo.findByIssueUrl(t.issueUrl);
+  if (!row) return json(200, { ignored: true, reason: 'not an FFRS issue' });
+  const patch = t.patch(row);
+  const effects = t.effects(row);
+  await deps.repo.update(row.id, patch, effects);
+  log('info', 'webhook_applied', { ref: row.ref, event, patch: Object.keys(patch), effects });
+  return json(200, { ref: row.ref, ...patch });
 }

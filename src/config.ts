@@ -15,6 +15,7 @@ const Env = z.object({
   ALERT_EMAIL: z.string().email().optional(),
   GITHUB_REPO: z.string().regex(/^[\w.-]+\/[\w.-]+$/, 'owner/repo').optional(),
   GITHUB_TOKEN: z.string().min(1).optional(),
+  GITHUB_WEBHOOK_SECRET: z.string().min(1).optional(), // absent = webhook route disabled (404)
 });
 export type Config = z.infer<typeof Env> & { allowedOrigins: string[] };
 

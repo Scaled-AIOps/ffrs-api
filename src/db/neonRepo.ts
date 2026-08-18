@@ -26,6 +26,16 @@ export function neonRepo(databaseUrl: string): FeedbackRepo {
       return row;
     },
 
+    async findByIssueUrl(url) {
+      const [row] = await db.select().from(feedback).where(eq(feedback.githubIssueUrl, url)).limit(1);
+      return row;
+    },
+
+    async update(id, patch, types = []) {
+      await db.update(feedback).set(patch).where(eq(feedback.id, id));
+      if (types.length) await db.insert(sideEffects).values(types.map((type) => ({ feedbackId: id, type })));
+    },
+
     async claimDueEffects(limit, now) {
       // Neon HTTP driver has no interactive transactions; claim atomically with UPDATE … RETURNING.
       const claimed = await db

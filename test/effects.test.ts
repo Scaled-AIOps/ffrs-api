@@ -52,6 +52,18 @@ describe('effects', () => {
     const none = buildEffects(cfg);
     expect(Object.keys(none)).toEqual([]);
     const all = buildEffects({ ...cfg, FROM_EMAIL: 'f@x.org', ALERT_EMAIL: 'a@x.org', GITHUB_REPO: 'o/r', GITHUB_TOKEN: 't' }, { mailer: async () => {} });
-    expect(Object.keys(all).sort()).toEqual(['ack_email', 'alert_email', 'github_issue']);
+    expect(Object.keys(all).sort()).toEqual(['ack_email', 'alert_email', 'close_email', 'github_issue']);
+  });
+});
+
+describe('close email', () => {
+  it('states the outcome, links the issue and status page', async () => {
+    const { closeEmail } = await import('../src/effects/index.js');
+    const sent: Mail[] = [];
+    await closeEmail(b, async (m) => { sent.push(m); })({ ...row, outcome: 'fixed', githubIssueUrl: 'https://github.com/o/r/issues/7', status: 'closed' });
+    expect(sent[0]!.subject).toBe('[FB-7K3M2Q] fixed: Nav overlaps hero');
+    expect(sent[0]!.text).toContain('has been fixed');
+    expect(sent[0]!.text).toContain('https://github.com/o/r/issues/7');
+    expect(sent[0]!.text).toContain('/feedback/?ref=FB-7K3M2Q');
   });
 });

@@ -44,6 +44,14 @@ export function memoryRepo(): FeedbackRepo & { rows: FeedbackRow[]; effects: Sid
     async findByRef(ref) {
       return rows.find((r) => r.ref === ref);
     },
+    async findByIssueUrl(url) {
+      return rows.find((r) => r.githubIssueUrl === url);
+    },
+    async update(id, patch, types = []) {
+      const row = rows.find((r) => r.id === id)!;
+      Object.assign(row, patch);
+      for (const type of types) effects.push({ id: effects.length + 1, feedbackId: row.id, type, attempts: 0, nextTryAt: new Date(0), doneAt: null, lastError: null });
+    },
     async claimDueEffects(limit, now) {
       const due = effects.filter((e) => !e.doneAt && e.nextTryAt <= now).slice(0, limit);
       for (const e of due) { e.attempts++; e.nextTryAt = new Date(now.getTime() + 120_000); }
