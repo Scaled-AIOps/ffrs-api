@@ -1,5 +1,7 @@
 # FFRS agentic Respond stage
 
+**Production runner (scaledaiops.org): a Claude Code cloud routine** — `FFRS agent`, hourly, sources `Scaled-AIOps/scaledaiops.org` + `Scaled-AIOps/feedback`, prompt = the protocol below; managed at https://claude.ai/code/routines. Billed to the Claude subscription, no API key. The files here are the **self-hosted alternative** (GitHub Actions + `claude -p` with an `ANTHROPIC_API_KEY`), same protocol and labels.
+
 `run.mjs` wraps Claude Code (headless) to perform the FFRS **Respond** stage on tracker issues. Runs from GitHub Actions in the tracker repo (see `workflows/`), against a checkout of the target repo.
 
 - **respond mode** (schedule / dispatch): for up to `MAX_ITEMS` open `ffrs` issues with a `kind:*` label and no response yet → the agent picks `pr` (edits files, runs `./build.sh` + `npm run test:local`; wrapper opens a PR on the target repo, comments, labels `agent:pr ffrs:responded`), `proposal` (comment with `/accept` · `/confirm` protocol, label `agent:proposal`) or `skip`.
