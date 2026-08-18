@@ -10,9 +10,10 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "build": "node esbuild.config.mjs",
+    "package": "npm run build && rm -f dist/handler.zip && cd dist && zip -q handler.zip handler.mjs handler.mjs.map",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
-    "check": "npm run typecheck && npm test && npm run build"
+    "check": "npm run typecheck && npm test && npm run package"
   },
   "dependencies": {
     "@neondatabase/serverless": "^1.0.1",
