@@ -59,15 +59,16 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Install Claude Code and target deps
+      - name: Install agent CLI and target deps
         if: env.handled != '1'
         run: |
-          npm i -g @anthropic-ai/claude-code
+          npm i -g ${{ vars.AGENT_PACKAGE }}
           cd target && npm ci && npx playwright install --with-deps chromium
       - name: Run FFRS agent
         if: env.handled != '1'
         env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          AGENT_CMD: ${{ vars.AGENT_CMD }}
+          AGENT_API_KEY: ${{ secrets.AGENT_API_KEY }}
           GITHUB_TOKEN: ${{ github.token }}
           FFRS_AGENT_TOKEN: ${{ secrets.FFRS_AGENT_TOKEN }}
           MODE: ${{ github.event_name == 'issue_comment' && 'execute' || 'respond' }}

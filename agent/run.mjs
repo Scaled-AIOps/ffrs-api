@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 /**
- * FFRS agentic Respond stage — wrapper around Claude Code (headless).
+ * FFRS agentic Respond stage — wrapper around a headless coding-agent CLI.
  * Owns everything with side effects (git, PRs, comments, labels); the agent only edits files and runs tests.
  *
  * Env: GITHUB_TOKEN (comment/label on tracker repo; the workflow token), FFRS_AGENT_TOKEN (push + PR on the target repo),
- *      TRACKER_REPO (owner/repo), TARGET_REPO (owner/repo), TARGET_DIR (checkout path), ANTHROPIC_API_KEY (used by claude),
+ *      TRACKER_REPO (owner/repo), TARGET_REPO (owner/repo), TARGET_DIR (checkout path), AGENT_CMD (agent CLI + args; the prompt is appended as the last argument; must print JSON with a `result` field or the verdict JSON as its last line),
  *      MAX_ITEMS (default 3), MODE=respond|execute, ISSUE_NUMBER (execute mode).
  */
 import { execFileSync, spawnSync } from 'node:child_process';
@@ -42,19 +42,18 @@ function runAgent(issue) {
   const prompt = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'prompt.md'), 'utf8')
     .replace('{{MODE}}', MODE).replace('{{EXECUTE_NOTE}}', executeNote).replace('{{REF}}', ref).replace('{{KIND}}', kind).replace('{{SEVERITY}}', severity)
     .replace('{{ISSUE_URL}}', issue.url).replace('{{TITLE}}', issue.title).replace('{{BODY}}', (issue.body ?? '').replace(REF, '').trim());
-  const r = spawnSync('claude', ['-p', prompt, '--output-format', 'json', '--max-turns', '60',
-    '--allowedTools', 'Read,Glob,Grep,Edit,Write,Bash(./build.sh),Bash(npm run test:local),Bash(npm run build),Bash(ls*),Bash(cat*)'],
-    { cwd: DIR, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, env: process.env });
+  const [cmd, ...args] = env('AGENT_CMD').split(' ');
+  const r = spawnSync(cmd, [...args, prompt], { cwd: DIR, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, env: process.env });
   if (r.status !== 0) {
     let reason = (r.stderr || '').slice(-800);
     try { const j = JSON.parse(r.stdout); reason = `${j.result ?? ''} ${j.error ?? ''}`.trim() || reason; } catch { reason ||= (r.stdout || '').slice(0, 800); }
-    throw new Error(`claude exited ${r.status}: ${reason}`);
+    throw new Error(`agent exited ${r.status}: ${reason}`);
   }
-  const out = JSON.parse(r.stdout);
-  const text = typeof out.result === 'string' ? out.result : JSON.stringify(out);
+  let text = r.stdout;
+  try { const out = JSON.parse(r.stdout); text = typeof out.result === 'string' ? out.result : JSON.stringify(out); } catch { /* plain-text agents: use stdout as-is */ }
   const line = text.trim().split('\n').reverse().find((l) => l.trim().startsWith('{'));
   if (!line) throw new Error('agent produced no verdict JSON');
-  return { ref, verdict: JSON.parse(line), cost: out.total_cost_usd, turns: out.num_turns };
+  return { ref, verdict: JSON.parse(line) };
 }
 
 function git(args) { return execFileSync('git', args, { cwd: DIR, encoding: 'utf8' }).trim(); }
@@ -78,8 +77,8 @@ const label = (n, ...ls) => gh(['issue', 'edit', String(n), '--repo', TRACKER, .
 for (const issue of candidates()) {
   try {
     git(['checkout', '-q', '-f', 'main']); git(['clean', '-fdq']);
-    const { ref, verdict: v, cost, turns } = runAgent(issue);
-    log('verdict', { ref, path: v.path, cost, turns });
+    const { ref, verdict: v } = runAgent(issue);
+    log('verdict', { ref, path: v.path });
     if (v.path === 'pr') {
       const url = openPr(issue, ref, v);
       if (url) {

@@ -22,7 +22,7 @@ Capture API of the **Fast Feedback Resolution System** (FFRS). Dependency-minima
 
 ## Agentic Respond stage (Phase 8)
 
-`agent/run.mjs` + `agent/workflows/ffrs-agent.yml` run Claude Code headless from GitHub Actions in the tracker repo: open a PR on the target repo (code/content path) or post a proposal with the `/accept` · `/confirm` · `/reject` protocol; `/confirm` by a maintainer executes. Metrics distinguish TTFR (any first response, agent included), TTHR (first human) and agent share (labels `agent:*`). See `agent/README.md`.
+`agent/run.mjs` + `agent/workflows/ffrs-agent.yml` run a headless coding-agent CLI (`AGENT_CMD`) from GitHub Actions in the tracker repo: open a PR on the target repo (code/content path) or post a proposal with the `/accept` · `/confirm` · `/reject` protocol; `/confirm` by a maintainer executes. Metrics distinguish TTFR (any first response, agent included), TTHR (first human) and agent share (labels `agent:*`). See `agent/README.md`.
 
 ## Env
 
