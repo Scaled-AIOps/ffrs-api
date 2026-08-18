@@ -28,7 +28,8 @@ export function kindOf(issue: Pick<IssueView, 'labels'>): Kind | null {
 export async function statusOf(tracker: Tracker, s: Sidecar): Promise<StatusView | undefined> {
   const issue = await tracker.getIssue(s.issueNumber);
   if (!issue) return undefined;
-  const respondedAt = issue.comments > 0 ? await tracker.firstHumanCommentAt(issue.number) : null;
+  const first = issue.comments > 0 ? await tracker.firstCommentsAt(issue.number) : { any: null, human: null };
+  const respondedAt = first.any;
   const closed = issue.state === 'closed';
   return {
     ref: s.ref, kind: s.kind, status: closed ? 'closed' : respondedAt ? 'responded' : 'routed',

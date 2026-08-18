@@ -7,9 +7,9 @@ export function weeklyReport(rows: MetricsRow[], weekMonday: string, siteName: s
   const fmt = (s: number | null) => (s === null ? '—' : s < 3600 ? `${Math.round(s / 60)} min` : s < 86400 ? `${(s / 3600).toFixed(1)} h` : `${(s / 86400).toFixed(1)} d`);
   const pctf = (x: number | null) => (x === null ? '—' : `${Math.round(x * 100)}%`);
   const table = (rs: MetricsRow[]) => [
-    '| Week | Kind | n | TTFR p50 | TTFR p90 | TTC p50 | Loop closure | Signal |',
-    '|---|---|---:|---:|---:|---:|---:|---:|',
-    ...rs.map((r) => `| ${r.week} | ${r.kind} | ${r.n} | ${fmt(r.ttfrP50)} | ${fmt(r.ttfrP90)} | ${fmt(r.ttcP50)} | ${pctf(r.loopClosure)} | ${pctf(r.signalRatio)} |`),
+    '| Week | Kind | n | TTFR p50 | TTFR p90 | TTHR p50 | TTC p50 | Loop closure | Agent share | Signal |',
+    '|---|---|---:|---:|---:|---:|---:|---:|---:|---:|',
+    ...rs.map((r) => `| ${r.week} | ${r.kind} | ${r.n} | ${fmt(r.ttfrP50)} | ${fmt(r.ttfrP90)} | ${fmt(r.tthrP50)} | ${fmt(r.ttcP50)} | ${pctf(r.loopClosure)} | ${pctf(r.agentShare)} | ${pctf(r.signalRatio)} |`),
   ].join('\n');
   const total = thisWeek.reduce((a, r) => a + r.n, 0);
   const body = [
@@ -23,7 +23,7 @@ export function weeklyReport(rows: MetricsRow[], weekMonday: string, siteName: s
     '',
     '</details>',
     '',
-    'Definitions: TTFR = first human comment − issue created; TTC = closed − created; loop closure = share closed; signal = share not spam/duplicate. Targets: TTFR < 72 h · TTC (bugs) < 30 d.',
+    'Definitions: TTFR = first response (agent or human) − created; TTHR = first human comment − created; TTC = closed − created; loop closure = share closed; agent share = closed items resolved by an agent PR/execution; signal = share not spam/duplicate. Targets: TTFR < 1 h (agent) · TTHR < 72 h · TTC (bugs) < 30 d.',
   ].join('\n');
   return { title: `FFRS weekly report — week of ${weekMonday}`, body, labels: ['ffrs', 'ffrs-report'] };
 }

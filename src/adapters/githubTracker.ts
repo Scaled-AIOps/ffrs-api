@@ -34,10 +34,10 @@ export function githubTracker(repo: string, token: string, fetchImpl: typeof fet
       const raw = await api(`/repos/${repo}/issues/${number}`);
       return raw === undefined ? undefined : view(Issue.parse(raw));
     },
-    async firstHumanCommentAt(number) {
+    async firstCommentsAt(number) {
       const comments = z.array(Comment).parse(await api(`/repos/${repo}/issues/${number}/comments?per_page=100`));
-      const first = comments.find((c) => c.user.type === 'User');
-      return first ? new Date(first.created_at) : null;
+      const at = (c?: z.infer<typeof Comment>) => (c ? new Date(c.created_at) : null);
+      return { any: at(comments[0]), human: at(comments.find((c) => c.user.type === 'User')) };
     },
     async listIssues() {
       const out: IssueView[] = [];

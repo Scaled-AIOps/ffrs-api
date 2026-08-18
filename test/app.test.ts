@@ -25,9 +25,10 @@ describe('POST /api/feedback', () => {
     expect(g).toMatchObject({ ref, kind: 'bug', status: 'routed', outcome: null, respondedAt: null, closedAt: null });
     expect(g).not.toHaveProperty('email');
     const t1 = new Date('2026-08-19T09:00:00Z');
+    tracker.comment(1, new Date('2026-08-18T18:00:00Z'), false); // agent (bot) response counts as Respond
     tracker.comment(1, t1);
     g = body(await app(evt('GET', `/api/feedback/${ref}`)));
-    expect(g).toMatchObject({ status: 'responded', respondedAt: t1.toISOString() });
+    expect(g).toMatchObject({ status: 'responded', respondedAt: '2026-08-18T18:00:00.000Z' });
     tracker.close(1, new Date('2026-08-20T09:00:00Z'), 'not_planned');
     g = body(await app(evt('GET', `/api/feedback/${ref}`)));
     expect(g).toMatchObject({ status: 'closed', outcome: 'declined' });

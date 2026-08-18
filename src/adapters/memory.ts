@@ -13,7 +13,7 @@ export function memoryTracker(now: () => Date = () => new Date()) {
       return { url: v.url, number, createdAt: v.createdAt };
     },
     async getIssue(n) { return issues.find((i) => i.number === n); },
-    async firstHumanCommentAt(n) { return comments.get(n)?.find((c) => c.human)?.at ?? null; },
+    async firstCommentsAt(n) { const cs = comments.get(n) ?? []; return { any: cs[0]?.at ?? null, human: cs.find((c) => c.human)?.at ?? null }; },
     async listIssues() { return issues.filter((i) => i.labels.includes('ffrs')); },
     comment(n, at, human = true) { comments.set(n, [...(comments.get(n) ?? []), { at, human }]); issues.find((i) => i.number === n)!.comments++; },
     close(n, at, reason = 'completed', labels = []) { Object.assign(issues.find((i) => i.number === n)!, { state: 'closed', closedAt: at, stateReason: reason, labels: [...issues.find((i) => i.number === n)!.labels, ...labels] }); },

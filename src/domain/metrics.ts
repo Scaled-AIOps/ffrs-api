@@ -2,16 +2,21 @@ import type { IssueView, Kind, Tracker } from './ports.js';
 import { deriveOutcome, kindOf } from './status.js';
 
 /** One item as the metrics see it — everything derived from the GitHub issue, nothing personal. */
+export type AgentPath = 'pr' | 'proposal' | 'executed' | 'skipped' | 'rejected' | null;
 export interface Item {
   ref: string | null; kind: Kind; severity: string | null; outcome: string | null; spam: boolean;
-  createdAt: Date; respondedAt: Date | null; closedAt: Date | null; issueUrl: string;
+  createdAt: Date; respondedAt: Date | null; humanRespondedAt: Date | null; closedAt: Date | null; issueUrl: string;
+  agent: AgentPath; // from agent:* labels (Phase 8)
 }
 
 /** One row per (kind, ISO week); durations in seconds, null when no data. */
 export interface MetricsRow {
   kind: Kind; week: string; n: number;
-  ttfrP50: number | null; ttfrP90: number | null; ttcP50: number | null;
+  ttfrP50: number | null; ttfrP90: number | null; // first response of any kind (agent included)
+  tthrP50: number | null;                          // first human decision/comment
+  ttcP50: number | null;
   loopClosure: number | null; signalRatio: number | null;
+  agentShare: number | null;                       // closed items resolved via agent PR/execution
 }
 
 const REF = /<!--\s*ffrs:(FB-[A-Z0-9]{6})\s*-->/;
@@ -26,11 +31,18 @@ export async function collectItems(tracker: Tracker): Promise<Item[]> {
       severity: issue.labels.find((l) => l.startsWith('severity:'))?.slice(9) ?? null,
       outcome: issue.state === 'closed' ? deriveOutcome(kind, issue) : null,
       spam: issue.labels.includes('spam') || issue.labels.includes('outcome:duplicate') || issue.stateReason === 'duplicate',
-      createdAt: issue.createdAt, respondedAt: issue.comments > 0 ? await tracker.firstHumanCommentAt(issue.number) : null,
+      createdAt: issue.createdAt, ...(await responded(tracker, issue)),
       closedAt: issue.closedAt, issueUrl: issue.url,
+      agent: (['pr', 'executed', 'proposal', 'skipped', 'rejected'] as const).find((p) => issue.labels.includes(`agent:${p}`)) ?? null,
     });
   }
   return out;
+}
+
+async function responded(tracker: Tracker, issue: IssueView): Promise<Pick<Item, 'respondedAt' | 'humanRespondedAt'>> {
+  if (issue.comments === 0) return { respondedAt: null, humanRespondedAt: null };
+  const f = await tracker.firstCommentsAt(issue.number);
+  return { respondedAt: f.any, humanRespondedAt: f.human };
 }
 
 export function aggregate(items: Item[]): MetricsRow[] {
@@ -42,15 +54,17 @@ export function aggregate(items: Item[]): MetricsRow[] {
     const ratio = (p: (i: Item) => boolean) => g.filter(p).length / g.length;
     return {
       kind, week, n: g.length,
-      ttfrP50: pct(d((i) => i.respondedAt), 0.5), ttfrP90: pct(d((i) => i.respondedAt), 0.9), ttcP50: pct(d((i) => i.closedAt), 0.5),
+      ttfrP50: pct(d((i) => i.respondedAt), 0.5), ttfrP90: pct(d((i) => i.respondedAt), 0.9), tthrP50: pct(d((i) => i.humanRespondedAt), 0.5),
+      ttcP50: pct(d((i) => i.closedAt), 0.5),
       loopClosure: ratio((i) => i.closedAt !== null), signalRatio: ratio((i) => !i.spam),
+      agentShare: g.some((i) => i.closedAt) ? g.filter((i) => i.closedAt && (i.agent === 'pr' || i.agent === 'executed')).length / g.filter((i) => i.closedAt).length : null,
     };
   });
 }
 
 /** Anonymised export row for the paper. */
 export function toExportRow(i: Item) {
-  return { ref: i.ref, kind: i.kind, severity: i.severity, outcome: i.outcome, spam: i.spam, createdAt: i.createdAt.toISOString(), respondedAt: i.respondedAt?.toISOString() ?? null, closedAt: i.closedAt?.toISOString() ?? null, issueUrl: i.issueUrl };
+  return { ref: i.ref, kind: i.kind, severity: i.severity, outcome: i.outcome, spam: i.spam, agent: i.agent, createdAt: i.createdAt.toISOString(), respondedAt: i.respondedAt?.toISOString() ?? null, humanRespondedAt: i.humanRespondedAt?.toISOString() ?? null, closedAt: i.closedAt?.toISOString() ?? null, issueUrl: i.issueUrl };
 }
 
 /** Linear-interpolated percentile (like percentile_cont). */

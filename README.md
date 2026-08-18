@@ -20,6 +20,10 @@ Capture API of the **Fast Feedback Response System** (FFRS). Dependency-minimal 
 | `POST /api/webhooks/github` | HMAC-verified. `issues.closed` → closing email once; `reopened` re-arms. 404 unless `GITHUB_WEBHOOK_SECRET`. |
 | EventBridge weekly (`{job:"weekly_report"}`) | Metrics per kind × ISO week (TTFR p50/p90, TTC p50, loop closure, signal) computed from the Issues API, filed as an issue labelled `ffrs-report`. |
 
+## Agentic Respond stage (Phase 8)
+
+`agent/run.mjs` + `agent/workflows/ffrs-agent.yml` run Claude Code headless from GitHub Actions in the tracker repo: open a PR on the target repo (code/content path) or post a proposal with the `/accept` · `/confirm` · `/reject` protocol; `/confirm` by a maintainer executes. Metrics distinguish TTFR (any first response, agent included), TTHR (first human) and agent share (labels `agent:*`). See `agent/README.md`.
+
 ## Env
 
 | Var | Required | Notes |
