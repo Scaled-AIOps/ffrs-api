@@ -6,7 +6,7 @@ import { RateLimiter } from '../src/guards/rateLimit.js';
 
 export const cfg: Config = {
   DATABASE_URL: 'postgres://x', SITE_NAME: 'test', ALLOWED_ORIGINS: 'https://embedder.example', allowedOrigins: ['https://embedder.example'],
-  FFRS_ENABLED: 'true', RATE_LIMIT_PER_MIN: 5,
+  FFRS_ENABLED: 'true', RATE_LIMIT_PER_MIN: 5, SITE_URL: 'https://www.scaledaiops.org',
 };
 
 export function testApp(over: Partial<AppDeps> = {}) {

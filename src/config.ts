@@ -9,6 +9,12 @@ const Env = z.object({
   SSM_PREFIX: z.string().optional(), // e.g. /ffrs — enables the runtime kill switch
   FFRS_ENABLED: z.enum(['true', 'false']).default('true'),
   RATE_LIMIT_PER_MIN: z.coerce.number().int().positive().default(5),
+  // Effects (Phase 3). Each effect registers only when its settings are present.
+  SITE_URL: z.string().url().default('https://www.scaledaiops.org'),
+  FROM_EMAIL: z.string().email().optional(),
+  ALERT_EMAIL: z.string().email().optional(),
+  GITHUB_REPO: z.string().regex(/^[\w.-]+\/[\w.-]+$/, 'owner/repo').optional(),
+  GITHUB_TOKEN: z.string().min(1).optional(),
 });
 export type Config = z.infer<typeof Env> & { allowedOrigins: string[] };
 

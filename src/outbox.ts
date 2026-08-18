@@ -1,9 +1,12 @@
 import type { EffectRegistry } from './effects/types.js';
-import type { FeedbackRepo } from './domain/repo.js';
+import type { FeedbackPatch, FeedbackRepo } from './domain/repo.js';
 import { log } from './log.js';
 
 const BACKOFF_MS = [60_000, 300_000, 900_000, 3_600_000, 21_600_000]; // 1m 5m 15m 1h 6h, then give up
-const STAMP: Record<string, 'acknowledgedAt' | 'routedAt' | undefined> = { ack_email: 'acknowledgedAt', github_issue: 'routedAt' };
+const STAMP: Record<string, (now: Date) => FeedbackPatch> = {
+  ack_email: (now) => ({ acknowledgedAt: now }),
+  github_issue: (now) => ({ routedAt: now, status: 'routed' }),
+};
 
 /** Drain due outbox rows once. Idempotent per row: claim → run → complete/fail with backoff. */
 export async function drainOutbox(repo: FeedbackRepo, effects: EffectRegistry, limit = 25, now = new Date()): Promise<{ done: number; failed: number }> {
@@ -17,8 +20,8 @@ export async function drainOutbox(repo: FeedbackRepo, effects: EffectRegistry, l
       continue;
     }
     try {
-      await run(row.feedback);
-      await repo.completeEffect(row.id, now, STAMP[row.type]);
+      const patch = await run(row.feedback);
+      await repo.completeEffect(row.id, now, { ...STAMP[row.type]?.(now), ...patch });
       done++;
     } catch (err) {
       const attempt = row.attempts; // already incremented by claim

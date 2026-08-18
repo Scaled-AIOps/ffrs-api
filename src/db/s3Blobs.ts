@@ -8,5 +8,11 @@ export function s3Blobs(bucket: string): BlobStore {
       client ??= new S3Client({});
       await client.send(new PutObjectCommand({ Bucket: bucket, Key: key, Body: bytes, ContentType: contentType }));
     },
+    async url(key, ttlSeconds) {
+      const { S3Client, GetObjectCommand } = await import('@aws-sdk/client-s3');
+      const { getSignedUrl } = await import('@aws-sdk/s3-request-presigner');
+      client ??= new S3Client({});
+      return getSignedUrl(client, new GetObjectCommand({ Bucket: bucket, Key: key }), { expiresIn: ttlSeconds });
+    },
   };
 }

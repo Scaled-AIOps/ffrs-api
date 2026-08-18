@@ -49,11 +49,14 @@ export function memoryRepo(): FeedbackRepo & { rows: FeedbackRow[]; effects: Sid
       for (const e of due) { e.attempts++; e.nextTryAt = new Date(now.getTime() + 120_000); }
       return due.map((e) => ({ ...e, feedback: rows.find((r) => r.id === e.feedbackId)! }));
     },
-    async completeEffect(id, now, stamp) {
+    async completeEffect(id, now, patch = {}) {
       const e = effects.find((x) => x.id === id)!;
       e.doneAt = now; e.lastError = null;
       const row = rows.find((r) => r.id === e.feedbackId)!;
-      if (stamp && !row[stamp]) row[stamp] = now;
+      if (patch.acknowledgedAt && !row.acknowledgedAt) row.acknowledgedAt = patch.acknowledgedAt;
+      if (patch.routedAt && !row.routedAt) row.routedAt = patch.routedAt;
+      if (patch.githubIssueUrl) row.githubIssueUrl = patch.githubIssueUrl;
+      if (patch.status) row.status = patch.status;
     },
     async failEffect(id, error, nextTryAt) {
       const e = effects.find((x) => x.id === id)!;

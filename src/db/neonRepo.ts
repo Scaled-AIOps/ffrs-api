@@ -1,5 +1,5 @@
 import { neon } from '@neondatabase/serverless';
-import { and, eq, isNull, lte, sql } from 'drizzle-orm';
+import { eq, isNull, lte, sql } from 'drizzle-orm';
 import { drizzle, type NeonHttpDatabase } from 'drizzle-orm/neon-http';
 import type { EffectType, FeedbackRepo } from '../domain/repo.js';
 import { feedback, sideEffects, type FeedbackRow, type NewFeedback } from './schema.js';
@@ -42,9 +42,18 @@ export function neonRepo(databaseUrl: string): FeedbackRepo {
       return claimed.map((c) => ({ ...c, feedback: byId.get(c.feedbackId)! }));
     },
 
-    async completeEffect(id, now, stamp) {
+    async completeEffect(id, now, patch = {}) {
       const [row] = await db.update(sideEffects).set({ doneAt: now, lastError: null }).where(eq(sideEffects.id, id)).returning({ feedbackId: sideEffects.feedbackId });
-      if (row && stamp) await db.update(feedback).set({ [stamp]: now }).where(and(eq(feedback.id, row.feedbackId), isNull(feedback[stamp])));
+      if (!row || !Object.keys(patch).length) return;
+      await db
+        .update(feedback)
+        .set({
+          ...(patch.acknowledgedAt ? { acknowledgedAt: sql`coalesce(${feedback.acknowledgedAt}, ${patch.acknowledgedAt})` } : {}),
+          ...(patch.routedAt ? { routedAt: sql`coalesce(${feedback.routedAt}, ${patch.routedAt})` } : {}),
+          ...(patch.githubIssueUrl ? { githubIssueUrl: patch.githubIssueUrl } : {}),
+          ...(patch.status ? { status: patch.status } : {}),
+        })
+        .where(eq(feedback.id, row.feedbackId));
     },
 
     async failEffect(id, error, nextTryAt) {

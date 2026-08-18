@@ -10,6 +10,6 @@ await build({
   format: 'esm',
   minify: true,
   sourcemap: true,
-  external: ['@aws-sdk/*'],
+  external: ['@aws-sdk/client-*'], // presigner + smithy get bundled
   banner: { js: 'import { createRequire } from "module"; const require = createRequire(import.meta.url);' },
 });

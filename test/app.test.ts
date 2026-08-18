@@ -69,7 +69,7 @@ describe('POST /api/feedback', () => {
     const none = testApp();
     expect(body(await none.app(evt('POST', '/api/feedback', { ...validBug, screenshot: shot }))).error.code).toBe('screenshots_disabled');
     const puts: string[] = [];
-    const withBlobs = testApp({ blobs: { put: async (k) => { puts.push(k); } } });
+    const withBlobs = testApp({ blobs: { put: async (k) => { puts.push(k); }, url: async (k) => `https://s3/${k}` } });
     const r = await withBlobs.app(evt('POST', '/api/feedback', { ...validBug, screenshot: shot }));
     expect(r.statusCode).toBe(202);
     expect(puts[0]).toMatch(/^\d{4}-\d{2}-\d{2}\/FB-[A-Z0-9]{6}\.jpg$/);

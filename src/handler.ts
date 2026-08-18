@@ -4,16 +4,14 @@ import { loadSecretsFromSsm } from './bootstrap.js';
 import { isEnabled, loadConfig } from './config.js';
 import { neonRepo } from './db/neonRepo.js';
 import { s3Blobs } from './db/s3Blobs.js';
+import { buildEffects } from './effects/index.js';
 import type { EffectRegistry } from './effects/types.js';
 import { RateLimiter } from './guards/rateLimit.js';
 import { turnstileVerifier } from './guards/turnstile.js';
 import { log } from './log.js';
 import { drainOutbox } from './outbox.js';
 
-// Effects are registered in Phase 3 (ack email, GitHub issue, alert). Empty registry = rows are parked, not lost.
-const effects: EffectRegistry = {};
-
-interface Wiring { app: ReturnType<typeof createApp>; repo: ReturnType<typeof neonRepo> }
+interface Wiring { app: ReturnType<typeof createApp>; repo: ReturnType<typeof neonRepo>; effects: EffectRegistry }
 let wiring: Promise<Wiring> | undefined;
 
 // Cold-start wiring, once per instance. Fails fast on bad config — a mis-deployed Lambda must not serve requests.
@@ -32,11 +30,11 @@ async function init(): Promise<Wiring> {
     ...(turnstile ? { turnstile } : {}),
     isEnabled: () => isEnabled(cfg),
   });
-  return { app, repo };
+  return { app, repo, effects: buildEffects(cfg, blobs ? { blobs } : {}) };
 }
 
 export async function handler(event: APIGatewayProxyEventV2 | ScheduledEvent, _ctx: Context) {
-  const { app, repo } = await (wiring ??= init().catch((e) => { wiring = undefined; throw e; }));
+  const { app, repo, effects } = await (wiring ??= init().catch((e) => { wiring = undefined; throw e; }));
   if ('requestContext' in event) return app(event);
   const result = await drainOutbox(repo, effects);
   log('info', 'outbox_drained', result);

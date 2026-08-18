@@ -17,12 +17,13 @@ describe('outbox', () => {
     let calls = 0;
     const r = await drainOutbox(repo, {
       ack_email: async () => { calls++; },
-      github_issue: async () => { throw new Error('gh down'); },
+      github_issue: async (f) => { if (f.id === 2) throw new Error('gh down'); return { githubIssueUrl: 'https://github.com/x/y/issues/1' }; },
     }, 25, t0);
-    expect(r).toEqual({ done: 1, failed: 4 }); // 1 ack ok; 2 github failed; 2 alert unregistered → parked
+    expect(r).toEqual({ done: 2, failed: 3 }); // ack ok, github#1 ok; github#2 failed; 2 alerts unregistered → parked
     expect(calls).toBe(1);
     expect(repo.rows[1]!.acknowledgedAt).toEqual(t0);
-    const gh = repo.effects.find((e) => e.type === 'github_issue')!;
+    expect(repo.rows[0]).toMatchObject({ status: 'routed', routedAt: t0, githubIssueUrl: 'https://github.com/x/y/issues/1' });
+    const gh = repo.effects.find((e) => e.type === 'github_issue' && e.feedbackId === 2)!;
     expect(gh.attempts).toBe(1);
     expect(gh.nextTryAt.getTime()).toBe(t0.getTime() + 60_000);
     expect(gh.lastError).toMatch(/gh down/);

@@ -8,7 +8,7 @@ Capture API of the **Fast Feedback Response System** (FFRS) — a Node 22 Lambda
 |---|---|
 | `POST /api/feedback` | Capture. Validates (Zod) → guards (rate limit, honeypot, Turnstile) → durable insert + queued side effects → `202 {ref}`. Idempotent on `Idempotency-Key`. |
 | `GET /api/feedback/:ref` | Public status timeline (never body/email/screenshot). |
-| EventBridge (1 min) | Drains the `side_effects` outbox with backoff (1m→6h, then parked). |
+| EventBridge (1 min) | Drains the `side_effects` outbox with backoff (1m→6h, then parked). Effects: `ack_email` (stamps `acknowledged_at`), `github_issue` (stamps `routed_at`, status→routed, stores issue URL), `alert_email`. Missing settings ⇒ effect not registered, rows parked with a startup warning. |
 
 ## Env
 
@@ -22,6 +22,10 @@ Capture API of the **Fast Feedback Response System** (FFRS) — a Node 22 Lambda
 | `SSM_PREFIX` | prod | e.g. `/ffrs` → at cold start `DATABASE_URL`/`TURNSTILE_SECRET`/`GITHUB_TOKEN` are read from `${SSM_PREFIX}/<lower_name>` (SecureString) if not in env; runtime kill switch at `${SSM_PREFIX}/enabled`, cached 60 s |
 | `FFRS_ENABLED` | opt | `true`/`false` fallback when `SSM_PREFIX` unset |
 | `RATE_LIMIT_PER_MIN` | opt | default 5, per hashed IP, per Lambda instance |
+| `SITE_URL` | opt | base for status links in emails/issues (default `https://www.scaledaiops.org`) |
+| `FROM_EMAIL` | effects | SES sender; enables `ack_email` (and `alert_email` with `ALERT_EMAIL`) |
+| `ALERT_EMAIL` | effects | maintainer inbox for new-feedback alerts |
+| `GITHUB_REPO` + `GITHUB_TOKEN` | effects | `owner/repo` + token (SSM) → enables `github_issue`; screenshot embedded via 7-day presigned URL |
 
 ## Develop
 
@@ -41,7 +45,7 @@ src/app.ts          HTTP routing + guards, framework-free
 src/domain/         capture() (FFRS stage 1), Zod input schema, ref generator, repo interfaces
 src/db/             drizzle schema, neonRepo, memoryRepo, s3Blobs
 src/guards/         honeypot, rateLimit, turnstile
-src/effects/        Effect plug-in type (implementations land in Phase 3)
+src/effects/        Effect plug-ins: ackEmail, alertEmail, githubIssue; SES mailer; templates; buildEffects(cfg)
 src/outbox.ts       claim → run → complete / fail-with-backoff
 drizzle/            migrations (0000 schema, 0001 ffrs_metrics view)
 ```
