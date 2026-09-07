@@ -50,5 +50,8 @@ export function githubTracker(repo: string, token: string, fetchImpl: typeof fet
       }
       return out;
     },
+    async updateComment(id, body) {
+      await api(`/repos/${repo}/issues/comments/${id}`, { method: 'PATCH', body: JSON.stringify({ body }) });
+    },
   };
 }

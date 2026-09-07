@@ -23,6 +23,8 @@ export interface Tracker {
   firstCommentsAt(number: number): Promise<{ any: Date | null; human: Date | null }>;
   /** All FFRS-filed issues (label `ffrs`), oldest first. */
   listIssues(): Promise<IssueView[]>;
+  /** Rewrite a comment body (used to drop footers that hosted tooling appends to agent comments). */
+  updateComment(id: number, body: string): Promise<void>;
 }
 
 /** Private per-item sidecar: the only place an email address ever lives. */

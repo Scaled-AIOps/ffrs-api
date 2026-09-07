@@ -4,8 +4,9 @@ import type { IssueRef, IssueView, NewIssue, Sidecar, Store, Tracker } from '../
 export function memoryTracker(now: () => Date = () => new Date()) {
   const issues: IssueView[] = [];
   const comments = new Map<number, Array<{ at: Date; human: boolean }>>(); // human=false for bots and 🤖-prefixed agent comments
-  const t: Tracker & { issues: IssueView[]; comment(n: number, at: Date, human?: boolean): void; close(n: number, at: Date, reason?: IssueView['stateReason'], labels?: string[]): void } = {
-    issues,
+  const updated: Array<{ id: number; body: string }> = [];
+  const t: Tracker & { issues: IssueView[]; updated: typeof updated; comment(n: number, at: Date, human?: boolean): void; close(n: number, at: Date, reason?: IssueView['stateReason'], labels?: string[]): void } = {
+    issues, updated,
     async createIssue(i: NewIssue): Promise<IssueRef> {
       const number = issues.length + 1;
       const v: IssueView = { number, url: `https://github.com/o/r/issues/${number}`, createdAt: now(), closedAt: null, state: 'open', stateReason: null, labels: i.labels, comments: 0, body: i.body };
@@ -15,6 +16,7 @@ export function memoryTracker(now: () => Date = () => new Date()) {
     async getIssue(n) { return issues.find((i) => i.number === n); },
     async firstCommentsAt(n) { const cs = comments.get(n) ?? []; return { any: cs[0]?.at ?? null, human: cs.find((c) => c.human)?.at ?? null }; },
     async listIssues() { return issues.filter((i) => i.labels.includes('ffrs')); },
+    async updateComment(id, body) { updated.push({ id, body }); },
     comment(n, at, human = true) { comments.set(n, [...(comments.get(n) ?? []), { at, human }]); issues.find((i) => i.number === n)!.comments++; },
     close(n, at, reason = 'completed', labels = []) { Object.assign(issues.find((i) => i.number === n)!, { state: 'closed', closedAt: at, stateReason: reason, labels: [...issues.find((i) => i.number === n)!.labels, ...labels] }); },
   };
