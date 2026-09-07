@@ -1,6 +1,6 @@
 # FFRS agentic Respond stage
 
-**Production runner (scaledaiops.org): a hosted coding-agent routine** — `FFRS agent`, hourly, sources `Scaled-AIOps/scaledaiops.org` + `Scaled-AIOps/feedback`, prompt = the protocol below; managed in the agent provider's routine scheduler. Billed to the maintainers' existing agent subscription, no API key. The files here are the **self-hosted alternative** (GitHub Actions + any headless coding-agent CLI configured via `AGENT_CMD`), same protocol and labels.
+**Production runner (scaledaiops.org): a hosted coding-agent routine** — `FFRS agent`, hourly, sources `Scaled-AIOps/scaledaiops.org` + `Scaled-AIOps/feedback`, prompt = [`routine-prompt.md`](routine-prompt.md) (the versioned source; the routine scheduler is only the runtime, so edit the file first and then apply it to the routine). Billed to the maintainers' existing agent subscription, no API key. The files here are the **self-hosted alternative** (GitHub Actions + any headless coding-agent CLI configured via `AGENT_CMD`), same protocol and labels.
 
 `run.mjs` wraps a headless coding-agent CLI (`AGENT_CMD`, e.g. any agent that accepts a prompt argument and prints its final answer as JSON with a `result` field) to perform the FFRS **Respond** stage on tracker issues. Runs from GitHub Actions in the tracker repo (see `workflows/`), against a checkout of the target repo.
 
