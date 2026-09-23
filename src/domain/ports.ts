@@ -25,6 +25,8 @@ export interface Tracker {
   listIssues(): Promise<IssueView[]>;
   /** Rewrite a comment body (used to drop footers that hosted tooling appends to agent comments). */
   updateComment(id: number, body: string): Promise<void>;
+  /** When the tracker's token stops working, as last reported by the tracker; null if it never expires or is unknown. */
+  tokenExpiresAt(): Date | null;
 }
 
 /** Private per-item sidecar: the only place an email address ever lives. */

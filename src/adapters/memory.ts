@@ -1,7 +1,7 @@
 import type { IssueRef, IssueView, NewIssue, Sidecar, Store, Tracker } from '../domain/ports.js';
 
 /** In-memory Tracker + Store for tests and local runs. Same contracts, no I/O. */
-export function memoryTracker(now: () => Date = () => new Date()) {
+export function memoryTracker(now: () => Date = () => new Date(), tokenExpiry: Date | null = null) {
   const issues: IssueView[] = [];
   const comments = new Map<number, Array<{ at: Date; human: boolean }>>(); // human=false for bots and 🤖-prefixed agent comments
   const updated: Array<{ id: number; body: string }> = [];
@@ -17,6 +17,7 @@ export function memoryTracker(now: () => Date = () => new Date()) {
     async firstCommentsAt(n) { const cs = comments.get(n) ?? []; return { any: cs[0]?.at ?? null, human: cs.find((c) => c.human)?.at ?? null }; },
     async listIssues() { return issues.filter((i) => i.labels.includes('ffrs')); },
     async updateComment(id, body) { updated.push({ id, body }); },
+    tokenExpiresAt: () => tokenExpiry,
     comment(n, at, human = true) { comments.set(n, [...(comments.get(n) ?? []), { at, human }]); issues.find((i) => i.number === n)!.comments++; },
     close(n, at, reason = 'completed', labels = []) { Object.assign(issues.find((i) => i.number === n)!, { state: 'closed', closedAt: at, stateReason: reason, labels: [...issues.find((i) => i.number === n)!.labels, ...labels] }); },
   };

@@ -18,11 +18,14 @@ const view = (i: z.infer<typeof Issue>): IssueView => ({
 
 /** GitHub Issues REST — the system of record. Non-2xx throws. */
 export function githubTracker(repo: string, token: string, fetchImpl: typeof fetch = fetch): Tracker {
+  let expiresAt: Date | null = null; // GitHub reports a token's expiry on every response
   const api = async (path: string, init: RequestInit = {}): Promise<unknown> => {
     const res = await fetchImpl(`https://api.github.com${path}`, {
       ...init,
       headers: { authorization: `Bearer ${token}`, accept: 'application/vnd.github+json', 'user-agent': 'ffrs-api', ...(init.body ? { 'content-type': 'application/json' } : {}), ...(init.headers ?? {}) },
     });
+    const exp = res.headers.get('github-authentication-token-expiration');
+    if (exp) expiresAt = new Date(exp.replace(' UTC', 'Z').replace(' ', 'T'));
     if (res.status === 404) return undefined;
     if (!res.ok) throw new Error(`github ${init.method ?? 'GET'} ${path} HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`);
     return res.json();
@@ -53,5 +56,6 @@ export function githubTracker(repo: string, token: string, fetchImpl: typeof fet
     async updateComment(id, body) {
       await api(`/repos/${repo}/issues/comments/${id}`, { method: 'PATCH', body: JSON.stringify({ body }) });
     },
+    tokenExpiresAt: () => expiresAt,
   };
 }

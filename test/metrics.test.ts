@@ -48,6 +48,24 @@ describe('metrics from GitHub', () => {
     expect(toCsv([{ a: 1, b: 'x,"y"', c: null }])).toBe('a,b,c\r\n1,"x,""y""",\r\n');
   });
 
+  it('token expiry: warns within 21 days and once expired, silent otherwise', async () => {
+    const { tokenWarning } = await import('../src/reports/weekly.js');
+    const now = new Date('2026-09-23T00:00:00Z');
+    expect(tokenWarning(null, now)).toBeNull();
+    expect(tokenWarning(new Date('2026-12-01T00:00:00Z'), now)).toBeNull();
+    expect(tokenWarning(new Date('2026-10-03T00:00:00Z'), now)).toContain('expires on 2026-10-03 (10 days)');
+    expect(tokenWarning(new Date('2026-09-20T00:00:00Z'), now)).toContain('expired on 2026-09-20');
+    const t = memoryTracker(() => now, new Date('2026-10-01T00:00:00Z'));
+    await runWeeklyReports({ tenants: async () => registry([tenant], tenant.slug), runtime: () => ({ tracker: t }), store: { putBlob: async () => {} } }, now);
+    expect(t.issues[0]!.body.startsWith('> **Action needed:**')).toBe(true);
+  });
+  it('github tracker reads the token expiry header', async () => {
+    const { githubTracker } = await import('../src/adapters/githubTracker.js');
+    const f = (async () => new Response('[]', { headers: { 'github-authentication-token-expiration': '2026-12-21 00:00:00 UTC' } })) as unknown as typeof fetch;
+    const tr = githubTracker('o/r', 't', f);
+    await tr.listIssues();
+    expect(tr.tokenExpiresAt()?.toISOString()).toBe('2026-12-21T00:00:00.000Z');
+  });
   it('weekly report renders and is filed as an issue', async () => {
     const rows = [{ kind: 'bug' as const, week: '2026-08-10', n: 3, ttfrP50: 20 * 3600, ttfrP90: 60 * 3600, tthrP50: 24 * 3600, ttcP50: 3 * 86400, loopClosure: 1, signalRatio: 0.67, agentShare: 0.5 }];
     const r = weeklyReport(rows, '2026-08-10', 'scaledaiops.org');

@@ -18,14 +18,16 @@ Plan and rationale: `docs/independent-service.md`.
 
 One tag attaches the feedback tab; removing it detaches it. `data-site` names the tenant, and the
 page's origin must be on that tenant's list — a copied slug on another host gets a 403. Optional:
-`data-label`, `data-position="left"`, `data-privacy="/privacy/"` (linked beside the consent box);
-`rkFeedback.open()` / `.detach()` for programmatic control.
+`data-label`, `data-position="left"`, `data-color="#rrggbb"`, `data-privacy="/privacy/"` (linked
+beside the consent box), `data-turnstile="<sitekey>"` (required when the tenant has a Turnstile
+secret), `data-screenshot="bug|always"` (html2canvas, loaded on demand from the service; default
+never), `data-hide-on="/feedback/"` (path prefixes without the tab); `rkFeedback.open()` /
+`.detach()` for programmatic control.
 The widget renders in a Shadow DOM with a constructed stylesheet, so host CSS can't reach it and a
 strict host CSP needs only `script-src` + `connect-src` for `ffrs.scaledaiops.org`.
 
-The original scaledaiops.org widget (`assets/js/ffrs-widget.js` in the site repo) still posts to
-`/api/feedback` with no `site` and is served by the **default tenant** — unchanged for the paper's
-measurement period.
+scaledaiops.org is the default tenant and uses this widget too; the old same-origin `/api/*` path
+and API Gateway were removed on 2026-09-23.
 
 ## Tenants
 
@@ -66,11 +68,11 @@ Origin decides, and with neither, the default tenant serves it.
 | `GET /api/feedback/:ref` | Public timeline from GitHub + sidecar (timestamps only, never email/body). Refs are global; the sidecar knows its tenant. |
 | `GET /status/?ref=` | The central status page, rendered on the server (no JavaScript), branded for the item's tenant. Default `feedback_page` for tenants without their own; also takes `?sent=1` / `?error=` from the no-JS form. |
 | `POST /api/webhooks/github` | Tenant = the repository in the payload; HMAC-verified with that tenant's `webhook_secret`. `issues.closed` → closing email once; `reopened` re-arms; agent-comment footers stripped. |
-| EventBridge weekly (`{job:"weekly_report"}`) | Per tenant: metrics per kind × ISO week filed as an issue labelled `ffrs-report`. Across opted-in tenants: `research/<week>.csv` in the data bucket — pseudonym, kind, severity, timestamps, outcome, agent path; no text, contact, IP or link. |
+| EventBridge weekly (`{job:"weekly_report"}`) | Per tenant: metrics per kind × ISO week filed as an issue labelled `ffrs-report`, headed by a warning when the tracker token expires within 21 days. Across opted-in tenants: `research/<week>.csv` in the data bucket — pseudonym, kind, severity, timestamps, outcome, agent path; no text, contact, IP or link. |
 
 ## Agentic Respond stage (Phase 8)
 
-`agent/run.mjs` + `agent/workflows/ffrs-agent.yml` run a headless coding-agent CLI (`AGENT_CMD`) from GitHub Actions in the tracker repo: open a PR on the target repo (code/content path) or post a proposal with the `/accept` · `/confirm` · `/reject` protocol; `/confirm` by a maintainer executes. Metrics distinguish TTFR (any first response, agent included), TTHR (first human) and agent share (labels `agent:*`). See `agent/README.md`. Per tenant, `agent_target_repo` says where PRs may go; absent means no agent.
+`agent/run.mjs` + `agent/workflows/ffrs-agent.yml` run a headless coding-agent CLI (`AGENT_CMD`) from GitHub Actions in the tracker repo: open a PR on the target repo (code/content path) or post a proposal with the `/accept` · `/confirm` · `/reject` protocol; `/confirm` by a maintainer executes. Metrics distinguish TTFR (any first response, agent included), TTHR (first human) and agent share (labels `agent:*`). See `agent/README.md`. Per tenant, `agent_target_repo` says where PRs may go; `tenant.sh add` copies it into the tracker repo's `FFRS_TARGET_REPO` variable, which the workflow reads — unset means no agent.
 
 ## Env (service-wide)
 

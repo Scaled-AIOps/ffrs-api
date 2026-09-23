@@ -1,4 +1,5 @@
-# Copy to <tracker repo>/.github/workflows/ffrs-agent.yml
+# Copy to <tracker repo>/.github/workflows/ffrs-agent.yml. The target comes from the repo variable
+# FFRS_TARGET_REPO, set by `scripts/tenant.sh add` from the tenant's agent_target_repo; unset = no agent.
 name: FFRS agent
 on:
   schedule:
@@ -18,14 +19,15 @@ concurrency:
   cancel-in-progress: false
 env:
   TRACKER_REPO: ${{ github.repository }}
-  TARGET_REPO: Scaled-AIOps/scaledaiops.org
+  TARGET_REPO: ${{ vars.FFRS_TARGET_REPO }}
   TARGET_DIR: target
 jobs:
   agent:
     if: >-
+      vars.FFRS_TARGET_REPO != '' && (
       github.event_name != 'issue_comment' ||
       (contains(github.event.comment.body, '/confirm') && contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association) && contains(join(github.event.issue.labels.*.name, ','), 'agent:proposal')) ||
-      contains(github.event.comment.body, '/accept') || contains(github.event.comment.body, '/reject')
+      contains(github.event.comment.body, '/accept') || contains(github.event.comment.body, '/reject'))
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:

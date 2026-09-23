@@ -61,6 +61,11 @@ add)
   put turnstile_secret SecureString "${TENANT_TURNSTILE_SECRET:-}"
   put webhook_secret SecureString "${TENANT_WEBHOOK_SECRET:-}"
   put enabled String true
+  # The agent runs as a workflow in the tracker repo; this variable is what points it at the site.
+  if [[ -n "$TENANT_AGENT_TARGET_REPO" ]]; then
+    gh variable set FFRS_TARGET_REPO --repo "$TENANT_TRACKER_REPO" --body "$TENANT_AGENT_TARGET_REPO"
+    echo "agent: install agent/workflows/ffrs-agent.yml in $TENANT_TRACKER_REPO and set its AGENT_* variables/secrets and FFRS_AGENT_TOKEN"
+  fi
   echo "tenant $slug written as $pseudonym — live within 5 minutes. Embed:"
   echo "  <script src=\"https://ffrs.scaledaiops.org/widget.js\" data-site=\"$slug\" defer></script>"
   ;;

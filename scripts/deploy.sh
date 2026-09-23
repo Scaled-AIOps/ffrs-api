@@ -15,6 +15,7 @@ out() { terraform -chdir="$INFRA" output -json ffrs | python3 -c "import json,sy
 # Short cache: the URL is fixed, so embedders pick up a new widget within minutes.
 aws s3 cp widget/widget.js "s3://$(out assets_bucket)/widget.js" \
   --content-type 'text/javascript; charset=utf-8' --cache-control 'public, max-age=300'
+aws s3 sync widget/vendor "s3://$(out assets_bucket)/vendor" --cache-control 'public, max-age=31536000, immutable'
 aws cloudfront create-invalidation --distribution-id "$(out distribution_id)" --paths /widget.js \
   --query Invalidation.Id --output text >/dev/null
 echo "$(out endpoint) — widget at $(out endpoint)/widget.js — CNAME ffrs → $(out distribution_domain)"

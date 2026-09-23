@@ -3,7 +3,7 @@ import { aggregate, collectItems, mondayOf, toResearchRow } from '../domain/metr
 import type { Store, Tracker } from '../domain/ports.js';
 import { log } from '../log.js';
 import type { Tenant, TenantRegistry } from '../tenants.js';
-import { weeklyReport } from './weekly.js';
+import { tokenWarning, weeklyReport } from './weekly.js';
 
 export interface ReportDeps {
   tenants: () => Promise<TenantRegistry>;
@@ -26,7 +26,9 @@ export async function runWeeklyReports(deps: ReportDeps, now = new Date()): Prom
     try {
       const { tracker } = deps.runtime(t);
       const items = await collectItems(tracker);
-      const { url } = await tracker.createIssue(weeklyReport(aggregate(items), week, t.name));
+      const warning = tokenWarning(tracker.tokenExpiresAt(), now); // known once collectItems has called GitHub
+      if (warning) log('warn', 'tracker_token_expiring', { tenant: t.slug, expiresAt: tracker.tokenExpiresAt()?.toISOString() });
+      const { url } = await tracker.createIssue(weeklyReport(aggregate(items), week, t.name, warning));
       reports.push({ tenant: t.slug, url });
       if (t.research && t.pseudonym) research.push(...items.map((i) => toResearchRow(t.pseudonym!, i)));
       log('info', 'weekly_report_posted', { tenant: t.slug, week, url });
