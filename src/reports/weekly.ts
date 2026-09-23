@@ -35,7 +35,7 @@ export function weeklyReport(rows: MetricsRow[], weekMonday: string, siteName: s
     '',
     '</details>',
     '',
-    'Definitions: TTFR = first response (agent or human) − created; TTHR = first human comment − created; TTC = closed − created; loop closure = share closed; agent share = closed items resolved by an agent PR/execution; signal = share not spam/duplicate. Targets: TTFR < 1 h (agent) · TTHR < 72 h · TTC (bugs) < 30 d.',
+    'Definitions: TTFR = first response (agent or human) − created; TTHR = first human comment − created; TTC = closed − created; loop closure = share closed; agent share = closed items resolved by an agent PR/execution; signal = share not spam/duplicate. Targets (fixed in the case study before data collection): TTHR < 72 h p50 · TTC (bugs) < 30 d p50 · closing email to 100 % of consented closed items. TTFR and agent share have no target.',
   ].join('\n');
   return { title: `FFRS weekly report — week of ${weekMonday}`, body, labels: ['ffrs', 'ffrs-report'] };
 }
