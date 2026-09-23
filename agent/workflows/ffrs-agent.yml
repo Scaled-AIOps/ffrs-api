@@ -70,7 +70,8 @@ jobs:
         if: env.handled != '1'
         env:
           AGENT_CMD: ${{ vars.AGENT_CMD }}
-          AGENT_API_KEY: ${{ secrets.AGENT_API_KEY }}
+          AGENT_TOKEN_ENV: ${{ vars.AGENT_TOKEN_ENV }}
+          AGENT_TOKEN: ${{ secrets.AGENT_TOKEN }}
           GITHUB_TOKEN: ${{ github.token }}
           FFRS_AGENT_TOKEN: ${{ secrets.FFRS_AGENT_TOKEN }}
           MODE: ${{ github.event_name == 'issue_comment' && 'execute' || 'respond' }}

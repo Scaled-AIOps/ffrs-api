@@ -4,7 +4,8 @@
  * Owns everything with side effects (git, PRs, comments, labels); the agent only edits files and runs tests.
  *
  * Env: GITHUB_TOKEN (comment/label on tracker repo; the workflow token), FFRS_AGENT_TOKEN (push + PR on the target repo),
- *      TRACKER_REPO (owner/repo), TARGET_REPO (owner/repo), TARGET_DIR (checkout path), AGENT_CMD (agent CLI + args; the prompt is appended as the last argument; must print JSON with a `result` field or the verdict JSON as its last line),
+ *      TRACKER_REPO (owner/repo), TARGET_REPO (owner/repo), TARGET_DIR (checkout path), AGENT_CMD (JSON array: agent CLI + args; the prompt replaces a "{prompt}" element, else is appended; must print JSON with a `result` field or the verdict JSON as its last line),
+ *      AGENT_TOKEN + AGENT_TOKEN_ENV (the agent's credential and the variable name its CLI reads it from),
  *      MAX_ITEMS (default 3), MODE=respond|execute, ISSUE_NUMBER (execute mode).
  */
 import { execFileSync, spawnSync } from 'node:child_process';
@@ -42,8 +43,9 @@ function runAgent(issue) {
   const prompt = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'prompt.md'), 'utf8')
     .replace('{{MODE}}', MODE).replace('{{EXECUTE_NOTE}}', executeNote).replace('{{REF}}', ref).replace('{{KIND}}', kind).replace('{{SEVERITY}}', severity)
     .replace('{{ISSUE_URL}}', issue.url).replace('{{TITLE}}', issue.title).replace('{{BODY}}', (issue.body ?? '').replace(REF, '').trim());
-  const [cmd, ...args] = env('AGENT_CMD').split(' ');
-  const r = spawnSync(cmd, [...args, prompt], { cwd: DIR, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, env: process.env });
+  const [cmd, ...args] = JSON.parse(env('AGENT_CMD')); // an array, so an argument may contain spaces
+  const argv = args.includes('{prompt}') ? args.map((a) => (a === '{prompt}' ? prompt : a)) : [...args, prompt];
+  const r = spawnSync(cmd, argv, { cwd: DIR, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, env: agentEnv(), stdio: ['ignore', 'pipe', 'pipe'] });
   if (r.status !== 0) {
     let reason = (r.stderr || '').slice(-800);
     try { const j = JSON.parse(r.stdout); reason = `${j.result ?? ''} ${j.error ?? ''}`.trim() || reason; } catch { reason ||= (r.stdout || '').slice(0, 800); }
@@ -54,6 +56,12 @@ function runAgent(issue) {
   const line = text.trim().split('\n').reverse().find((l) => l.trim().startsWith('{'));
   if (!line) throw new Error('agent produced no verdict JSON');
   return { ref, verdict: JSON.parse(line) };
+}
+
+/** The agent gets only its own credential, under the name its CLI expects, and none of the GitHub tokens. */
+function agentEnv() {
+  const { GITHUB_TOKEN: _g, FFRS_AGENT_TOKEN: _f, AGENT_TOKEN: _a, ...rest } = process.env;
+  return process.env.AGENT_TOKEN_ENV ? { ...rest, [process.env.AGENT_TOKEN_ENV]: env('AGENT_TOKEN') } : rest;
 }
 
 function git(args) { return execFileSync('git', args, { cwd: DIR, encoding: 'utf8' }).trim(); }
