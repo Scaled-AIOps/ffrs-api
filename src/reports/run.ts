@@ -9,6 +9,7 @@ export interface ReportDeps {
   tenants: () => Promise<TenantRegistry>;
   runtime: (t: Tenant) => { tracker: Tracker };
   store: Pick<Store, 'putBlob'>;
+  studyStart: Date; // research rows only; the tenant's own report still covers everything
 }
 export interface ReportResult { week: string; reports: Array<{ tenant: string; url: string }>; researchRows: number }
 
@@ -30,7 +31,7 @@ export async function runWeeklyReports(deps: ReportDeps, now = new Date()): Prom
       if (warning) log('warn', 'tracker_token_expiring', { tenant: t.slug, expiresAt: tracker.tokenExpiresAt()?.toISOString() });
       const { url } = await tracker.createIssue(weeklyReport(aggregate(items), week, t.name, warning));
       reports.push({ tenant: t.slug, url });
-      if (t.research && t.pseudonym) research.push(...items.map((i) => toResearchRow(t.pseudonym!, i)));
+      if (t.research && t.pseudonym) research.push(...items.filter((i) => i.createdAt >= deps.studyStart).map((i) => toResearchRow(t.pseudonym!, i)));
       log('info', 'weekly_report_posted', { tenant: t.slug, week, url });
     } catch (err) {
       log('error', 'weekly_report_failed', { tenant: t.slug, week, err: String(err) }); // one tenant's outage must not skip the rest

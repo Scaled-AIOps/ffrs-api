@@ -56,7 +56,7 @@ describe('metrics from GitHub', () => {
     expect(tokenWarning(new Date('2026-10-03T00:00:00Z'), now)).toContain('expires on 2026-10-03 (10 days)');
     expect(tokenWarning(new Date('2026-09-20T00:00:00Z'), now)).toContain('expired on 2026-09-20');
     const t = memoryTracker(() => now, new Date('2026-10-01T00:00:00Z'));
-    await runWeeklyReports({ tenants: async () => registry([tenant], tenant.slug), runtime: () => ({ tracker: t }), store: { putBlob: async () => {} } }, now);
+    await runWeeklyReports({ tenants: async () => registry([tenant], tenant.slug), runtime: () => ({ tracker: t }), store: { putBlob: async () => {} }, studyStart: now }, now);
     expect(t.issues[0]!.body.startsWith('> **Action needed:**')).toBe(true);
   });
   it('github tracker reads the token expiry header', async () => {
@@ -71,18 +71,22 @@ describe('metrics from GitHub', () => {
     const r = weeklyReport(rows, '2026-08-10', 'scaledaiops.org');
     expect(r.body).toContain('| 2026-08-10 | bug | 3 | 20.0 h | 2.5 d | 1.0 d | 3.0 d | 100% | 50% | 67% |');
     expect(weeklyReport(rows, '2026-08-17', 'x').body).toContain('_No feedback captured this week._');
-    const t = memoryTracker(), t2 = memoryTracker(), blobs = new Map<string, string>();
+    let clock = new Date('2026-08-20T00:00:00Z');
+    const t = memoryTracker(() => clock), t2 = memoryTracker(), blobs = new Map<string, string>();
     await t2.createIssue({ title: '[bug] x', body: '<!-- ffrs:FB-XXXXXX -->', labels: ['ffrs', 'kind:bug'] });
     const optedOut = { ...tenant, slug: 'quiet', trackerRepo: 'o/q', research: false };
     const deps = {
       tenants: async () => registry([tenant, optedOut], tenant.slug),
       runtime: (x: typeof tenant) => ({ tracker: x.slug === 'quiet' ? t2 : t }),
       store: { putBlob: async (k: string, b: Uint8Array) => { blobs.set(k, Buffer.from(b).toString()); } },
+      studyStart: new Date('2026-08-21T00:00:00Z'),
     };
     const out = await runWeeklyReports(deps, new Date('2026-08-24T07:00:00Z'));
     expect(out).toEqual({ week: '2026-08-17', reports: [{ tenant: 'scaledaiops', url: 'https://github.com/o/r/issues/1' }, { tenant: 'quiet', url: 'https://github.com/o/r/issues/2' }], researchRows: 0 });
     expect(t.issues[0]!.labels).toEqual(['ffrs', 'ffrs-report']);
     expect(blobs.size).toBe(0); // nothing captured on the opted-in tenant, and the other opted out
+    await t.createIssue({ title: '[bug] old', body: '<!-- ffrs:FB-OOOOOO -->', labels: ['ffrs', 'kind:bug'] }); // before the study window
+    clock = new Date('2026-08-22T00:00:00Z');
     await t.createIssue({ title: '[feature] y', body: '<!-- ffrs:FB-YYYYYY -->', labels: ['ffrs', 'kind:feature'] });
     const again = await runWeeklyReports(deps, new Date('2026-08-24T07:00:00Z'));
     expect(again.researchRows).toBe(1);

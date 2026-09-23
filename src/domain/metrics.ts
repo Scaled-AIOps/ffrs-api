@@ -21,6 +21,9 @@ export interface MetricsRow {
 
 const REF = /<!--\s*ffrs:(FB-[A-Z0-9]{6})\s*-->/;
 
+/** Start of the paper's study window, after the service's acceptance checks: research data excludes anything filed earlier. */
+export const STUDY_START = new Date('2026-09-23T18:00:00+02:00');
+
 export async function collectItems(tracker: Tracker): Promise<Item[]> {
   const out: Item[] = [];
   for (const issue of await tracker.listIssues()) {

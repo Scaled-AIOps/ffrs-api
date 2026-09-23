@@ -3,6 +3,7 @@ import { githubTracker } from './adapters/githubTracker.js';
 import { s3Store } from './adapters/s3Store.js';
 import { createApp, type TenantRuntime } from './app.js';
 import { isEnabled, loadConfig } from './config.js';
+import { STUDY_START } from './domain/metrics.js';
 import { sesMailer } from './effects/mailer.js';
 import { RateLimiter } from './guards/rateLimit.js';
 import { turnstileVerifier } from './guards/turnstile.js';
@@ -39,7 +40,7 @@ async function init(): Promise<Wiring> {
   };
 
   const deps = { cfg, store, tenants, runtime, isEnabled: () => isEnabled(cfg), ...(mailer ? { mailer } : {}) };
-  return { app: createApp(deps), weekly: () => runWeeklyReports(deps) };
+  return { app: createApp(deps), weekly: () => runWeeklyReports({ ...deps, studyStart: STUDY_START }) };
 }
 
 export async function handler(event: APIGatewayProxyEventV2 | JobEvent, _ctx: Context) {
