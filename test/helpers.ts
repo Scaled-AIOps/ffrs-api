@@ -1,20 +1,32 @@
 import type { APIGatewayProxyEventV2 } from 'aws-lambda';
 import { memoryStore, memoryTracker } from '../src/adapters/memory.js';
-import { createApp, type AppDeps } from '../src/app.js';
+import { createApp, type AppDeps, type TenantRuntime } from '../src/app.js';
 import type { Config } from '../src/config.js';
 import type { Mail } from '../src/effects/mailer.js';
 import { RateLimiter } from '../src/guards/rateLimit.js';
+import { registry, type Tenant } from '../src/tenants.js';
 
-export const cfg: Config = {
-  SITE_NAME: 'scaledaiops.org', SITE_URL: 'https://www.scaledaiops.org', DATA_BUCKET: 'b', GITHUB_REPO: 'o/r', GITHUB_TOKEN: 't',
-  ALLOWED_ORIGINS: 'https://embedder.example', allowedOrigins: ['https://embedder.example'], FFRS_ENABLED: 'true', RATE_LIMIT_PER_MIN: 5,
+export const cfg: Config = { DATA_BUCKET: 'b', SSM_PREFIX: '/ffrs', DEFAULT_TENANT: 'scaledaiops', TENANT_TTL_S: 300 };
+
+export const tenant: Tenant = {
+  slug: 'scaledaiops', name: 'scaledaiops.org', siteUrl: 'https://www.scaledaiops.org', feedbackPage: 'https://www.scaledaiops.org/feedback/',
+  origins: ['https://www.scaledaiops.org', 'https://embedder.example'], trackerRepo: 'o/r', githubToken: 't', research: true, pseudonym: 'S1',
+  alertEmail: 'team@example.org', turnstileSecret: null, webhookSecret: null, agentTargetRepo: null, rateLimitPerMin: 5, brand: null, enabled: true,
 };
-export const branding = { siteName: cfg.SITE_NAME, siteUrl: cfg.SITE_URL };
+export const branding = { siteName: tenant.name, siteUrl: tenant.siteUrl, feedbackPage: tenant.feedbackPage };
 
-export function testApp(over: Partial<AppDeps> = {}) {
+/** One in-memory tenant (plus any extras), each with its own tracker; `over` patches the default tenant's runtime. */
+export function testApp(over: Partial<TenantRuntime> & Partial<Pick<AppDeps, 'mailer' | 'isEnabled'>> = {}, extraTenants: Tenant[] = []) {
   const tracker = memoryTracker(), store = memoryStore(), sent: Mail[] = [];
-  const deps: AppDeps = { cfg, tracker, store, branding, mailer: async (m) => { sent.push(m); }, alertTo: 'team@example.org', rateLimiter: new RateLimiter(5), isEnabled: async () => true, ...over };
-  return { app: createApp(deps), tracker, store, sent, deps };
+  const t: Tenant = { ...tenant, ...(over.tenant ?? {}) };
+  const runtimes = new Map<string, TenantRuntime>([[t.slug, { tenant: t, tracker, rateLimiter: new RateLimiter(5), ...(over.turnstile ? { turnstile: over.turnstile } : {}), ...(over.tracker ? { tracker: over.tracker } : {}) }]]);
+  for (const x of extraTenants) runtimes.set(x.slug, { tenant: x, tracker: memoryTracker(), rateLimiter: new RateLimiter(x.rateLimitPerMin) });
+  const reg = registry([t, ...extraTenants], t.slug);
+  const deps: AppDeps = {
+    cfg, store, tenants: async () => reg, runtime: (x) => runtimes.get(x.slug)!,
+    mailer: over.mailer ?? (async (m) => { sent.push(m); }), isEnabled: over.isEnabled ?? (async () => true),
+  };
+  return { app: createApp(deps), tracker, store, sent, deps, runtimes };
 }
 
 export function evt(method: string, path: string, body?: unknown, headers: Record<string, string> = {}, ip = '203.0.113.7'): APIGatewayProxyEventV2 {

@@ -1,29 +1,19 @@
 import { z } from 'zod';
 
+/** Service-wide settings only. Anything per site is a tenant field (tenants.ts). */
 const Env = z.object({
-  SITE_NAME: z.string().min(1),
-  ALLOWED_ORIGINS: z.string().default(''), // comma-separated; empty = same-origin only
-  TURNSTILE_SECRET: z.string().min(1).optional(), // absent = guard off (logged at startup)
-  DATA_BUCKET: z.string().min(1), // private S3 bucket: sidecars, idempotency map, screenshots
-  SSM_PREFIX: z.string().optional(), // e.g. /ffrs — enables the runtime kill switch
-  FFRS_ENABLED: z.enum(['true', 'false']).default('true'),
-  RATE_LIMIT_PER_MIN: z.coerce.number().int().positive().default(5),
-  SITE_URL: z.string().url().default('https://www.scaledaiops.org'),
-  GITHUB_REPO: z.string().regex(/^[\w.-]+\/[\w.-]+$/, 'owner/repo'), // system of record
-  GITHUB_TOKEN: z.string().min(1),
-  GITHUB_WEBHOOK_SECRET: z.string().min(1).optional(), // absent = webhook route disabled (404)
-  FROM_EMAIL: z.string().email().optional(),           // absent = no emails at all
-  ALERT_EMAIL: z.string().email().optional(),
+  DATA_BUCKET: z.string().min(1), // private S3 bucket: sidecars, idempotency map, screenshots, research exports
+  SSM_PREFIX: z.string().min(1),  // e.g. /ffrs — tenants live under <prefix>/tenants/, the kill switch at <prefix>/enabled
+  DEFAULT_TENANT: z.string().min(1), // serves requests that name no site (the original single-site widget)
+  FROM_EMAIL: z.string().email().optional(), // absent = no emails at all
+  TENANT_TTL_S: z.coerce.number().int().positive().default(300),
 });
-export type Config = z.infer<typeof Env> & { allowedOrigins: string[] };
+export type Config = z.infer<typeof Env>;
 
 let cached: Config | undefined;
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
-  if (cached) return cached;
-  const parsed = Env.parse(env);
-  cached = { ...parsed, allowedOrigins: parsed.ALLOWED_ORIGINS.split(',').map((s) => s.trim()).filter(Boolean) };
-  return cached;
+  return (cached ??= Env.parse(env));
 }
 
 /** Test hook — never call from production code. */
@@ -36,7 +26,6 @@ const KILL_SWITCH_TTL_MS = 60_000;
 let killSwitch: { value: boolean; fetchedAt: number } | undefined;
 
 export async function isEnabled(cfg: Config, now = Date.now()): Promise<boolean> {
-  if (!cfg.SSM_PREFIX) return cfg.FFRS_ENABLED === 'true';
   if (killSwitch && now - killSwitch.fetchedAt < KILL_SWITCH_TTL_MS) return killSwitch.value;
   const { SSMClient, GetParameterCommand } = await import('@aws-sdk/client-ssm');
   const out = await new SSMClient({}).send(new GetParameterCommand({ Name: `${cfg.SSM_PREFIX}/enabled` }));

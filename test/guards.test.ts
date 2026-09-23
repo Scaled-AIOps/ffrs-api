@@ -3,6 +3,16 @@ import { isHoneypotTripped } from '../src/guards/honeypot.js';
 import { RateLimiter } from '../src/guards/rateLimit.js';
 import { turnstileVerifier } from '../src/guards/turnstile.js';
 
+describe('origins', () => {
+  it('exact and wildcard: subdomains only, scheme fixed, dots literal', async () => {
+    const { originAllowed } = await import('../src/http.js');
+    const list = ['https://example.com', 'https://*.example.com'];
+    for (const ok of ['https://example.com', 'https://www.example.com', 'https://app.example.com', 'https://a.b.example.com']) expect(originAllowed(list, ok)).toBe(true);
+    for (const no of ['http://www.example.com', 'https://evilexample.com', 'https://example.com.evil.io', 'https://wwwxexamplexcom', 'https://www.example.co']) expect(originAllowed(list, no)).toBe(false);
+    expect(originAllowed(['https://*.example.com'], 'https://example.com')).toBe(false);
+  });
+});
+
 describe('guards', () => {
   it('honeypot trips only on non-empty value', () => {
     expect(isHoneypotTripped({})).toBe(false);

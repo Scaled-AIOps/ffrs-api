@@ -1,9 +1,9 @@
 import type { Kind, Outcome, Sidecar } from '../domain/ports.js';
 import type { Mail } from './mailer.js';
 
-export interface Branding { siteName: string; siteUrl: string }
+export interface Branding { siteName: string; siteUrl: string; feedbackPage: string }
 const KIND_LABEL: Record<Kind, string> = { bug: 'bug report', feature: 'feature request', contact: 'message' };
-export const statusUrl = (b: Branding, ref: string) => `${b.siteUrl}/feedback/?ref=${ref}`;
+export const statusUrl = (b: Branding, ref: string) => `${b.feedbackPage}?ref=${ref}`;
 
 export function ackMail(b: Branding, s: Sidecar): Mail {
   const text = [

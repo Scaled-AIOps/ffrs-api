@@ -6,6 +6,7 @@ const DATA_URL = /^data:image\/jpeg;base64,([A-Za-z0-9+/]+=*)$/;
 /** Wire format of POST /api/feedback — validated before anything else runs. */
 export const FeedbackInput = z
   .object({
+    site: z.string().regex(/^[a-z0-9-]{2,32}$/).optional(), // tenant slug; absent = the page's origin, else the default tenant
     kind: z.enum(['bug', 'feature', 'contact']),
     title: z.string().trim().min(3).max(140),
     body: z.string().trim().min(10).max(5000),

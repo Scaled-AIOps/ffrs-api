@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { body, evt, testApp, validBug, validFeature } from './helpers.js';
+import type { memoryTracker } from '../src/adapters/memory.js';
+import type { Tenant } from '../src/tenants.js';
+import { body, evt, tenant, testApp, validBug, validFeature } from './helpers.js';
 
 describe('POST /api/feedback', () => {
   it('files a GitHub issue, keeps email only in the sidecar, sends ack + alert, returns 202 with a ref', async () => {
@@ -71,6 +73,7 @@ describe('POST /api/feedback', () => {
     expect(r.statusCode).toBe(400);
     expect(body(r).error.details.map((d: { path: string }) => d.path)).toEqual(expect.arrayContaining(['title', 'body', 'severity']));
     expect(body(await app({ ...evt('POST', '/api/feedback'), body: '{nope' })).error.code).toBe('invalid_json');
+    expect(body(await app(evt('POST', '/api/feedback', { ...validFeature, site: 'no-such' }))).error.code).toBe('unknown_site');
   });
   it('honeypot → fake 202, nothing filed', async () => {
     const { app, tracker } = testApp();
@@ -98,7 +101,7 @@ describe('POST /api/feedback', () => {
     const shot = 'data:image/jpeg;base64,' + Buffer.from('jpegbytes').toString('base64');
     const { ref } = body(await app(evt('POST', '/api/feedback', { ...validBug, screenshot: shot })));
     const key = store.sidecars.get(ref)!.screenshotKey!;
-    expect(key).toMatch(/^screenshots\/\d{4}-\d{2}-\d{2}\/FB-[A-Z0-9]{6}\.jpg$/);
+    expect(key).toMatch(/^screenshots\/scaledaiops\/\d{4}-\d{2}-\d{2}\/FB-[A-Z0-9]{6}\.jpg$/);
     expect(store.blobs.has(key)).toBe(true);
     expect(tracker.issues[0]!.body).toContain(`![screenshot](https://s3.example/${key}?ttl=604800)`);
   });
@@ -116,5 +119,47 @@ describe('POST /api/feedback', () => {
     expect((await app(evt('OPTIONS', '/api/feedback', undefined, { origin: 'https://embedder.example' }))).headers?.['access-control-allow-origin']).toBe('https://embedder.example');
     expect((await app(evt('OPTIONS', '/api/feedback', undefined, { origin: 'https://evil.example' }))).headers?.['access-control-allow-origin']).toBeUndefined();
     expect((await app(evt('GET', '/api/nope'))).statusCode).toBe(404);
+  });
+  it('202 carries the tenant status URL', async () => {
+    const { app } = testApp();
+    const r = body(await app(evt('POST', '/api/feedback', validFeature)));
+    expect(r.statusUrl).toBe(`https://www.scaledaiops.org/feedback/?ref=${r.ref}`);
+  });
+});
+
+describe('tenants', () => {
+  const rk: Tenant = { ...tenant, slug: 'example', name: 'Example', siteUrl: 'https://www.example.com', feedbackPage: 'https://www.example.com/feedback/', origins: ['https://www.example.com'], trackerRepo: 'example-org/feedback', pseudonym: 'S9', alertEmail: null };
+  it('site picks the tenant; its origin, tracker and branding apply; the sidecar remembers it', async () => {
+    const { app, tracker, store, runtimes } = testApp({}, [rk]);
+    const r = await app(evt('POST', '/api/feedback', { ...validFeature, site: 'example' }, { origin: 'https://www.example.com' }));
+    expect(r.statusCode).toBe(202);
+    expect(r.headers?.['access-control-allow-origin']).toBe('https://www.example.com');
+    expect(body(r).statusUrl).toMatch(/^https:\/\/www\.example\.com\/feedback\/\?ref=FB-/);
+    expect(tracker.issues).toHaveLength(0);
+    const rkTracker = runtimes.get('example')!.tracker as ReturnType<typeof memoryTracker>;
+    expect(rkTracker.issues).toHaveLength(1);
+    expect(store.sidecars.get(body(r).ref)!.tenant).toBe('example');
+    // status lookups route by the sidecar's tenant, and a legacy sidecar (no tenant) falls back to the default
+    expect(body(await app(evt('GET', `/api/feedback/${body(r).ref}`))).status).toBe('routed');
+  });
+  it('no site: the origin decides, else the default tenant', async () => {
+    const { app, tracker, runtimes } = testApp({}, [rk]);
+    await app(evt('POST', '/api/feedback', validFeature, { origin: 'https://www.example.com' }));
+    expect((runtimes.get('example')!.tracker as ReturnType<typeof memoryTracker>).issues).toHaveLength(1);
+    await app(evt('POST', '/api/feedback', validFeature)); // curl, no origin
+    expect(tracker.issues).toHaveLength(1);
+  });
+  it('a site copied onto a foreign origin is refused, and so is a disabled tenant', async () => {
+    const { app } = testApp({}, [rk]);
+    const r = await app(evt('POST', '/api/feedback', { ...validFeature, site: 'example' }, { origin: 'https://evil.example' }));
+    expect(r.statusCode).toBe(403);
+    expect(body(r).error.code).toBe('origin_not_allowed');
+    const off = testApp({}, [{ ...rk, enabled: false }]);
+    expect(body(await off.app(evt('POST', '/api/feedback', { ...validFeature, site: 'example' }))).error.code).toBe('ffrs_disabled');
+  });
+  it('form posts redirect to that tenant\'s own page', async () => {
+    const { app } = testApp({}, [rk]);
+    const r = await app({ ...evt('POST', '/api/feedback', undefined, { 'content-type': 'application/x-www-form-urlencoded' }), body: 'site=example&kind=contact&title=Hello+there&body=A+question+about+delivery+zones' });
+    expect(String(r.headers?.['location'])).toMatch(/^https:\/\/www\.example\.com\/feedback\/\?sent=1&ref=FB-/);
   });
 });

@@ -3,7 +3,7 @@ import type { Sidecar } from '../src/domain/ports.js';
 import { ackMail, alertMail, closeMail, issueBody } from '../src/effects/templates.js';
 import { branding as b } from './helpers.js';
 
-const s: Sidecar = { ref: 'FB-7K3M2Q', issueNumber: 7, issueUrl: 'https://github.com/o/r/issues/7', kind: 'bug', title: 'Nav overlaps hero', createdAt: '2026-08-18T10:00:00.000Z', email: 'v@example.org', consent: true, screenshotKey: null, acknowledgedAt: null, closeEmailAt: null };
+const s: Sidecar = { ref: 'FB-7K3M2Q', tenant: 'scaledaiops', issueNumber: 7, issueUrl: 'https://github.com/o/r/issues/7', kind: 'bug', title: 'Nav overlaps hero', createdAt: '2026-08-18T10:00:00.000Z', email: 'v@example.org', consent: true, screenshotKey: null, acknowledgedAt: null, closeEmailAt: null };
 
 describe('templates', () => {
   it('ack: ref + status link, html links clickable', () => {

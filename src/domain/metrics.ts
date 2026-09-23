@@ -62,6 +62,12 @@ export function aggregate(items: Item[]): MetricsRow[] {
   });
 }
 
+/** Research row: one item under its tenant's pseudonym. No text, contact, IP or link — timestamps and categories only. */
+export function toResearchRow(pseudonym: string, i: Item) {
+  const { issueUrl: _url, ...rest } = toExportRow(i);
+  return { site: pseudonym, ...rest };
+}
+
 /** Anonymised export row for the paper. */
 export function toExportRow(i: Item) {
   return { ref: i.ref, kind: i.kind, severity: i.severity, outcome: i.outcome, spam: i.spam, agent: i.agent, createdAt: i.createdAt.toISOString(), respondedAt: i.respondedAt?.toISOString() ?? null, humanRespondedAt: i.humanRespondedAt?.toISOString() ?? null, closedAt: i.closedAt?.toISOString() ?? null, issueUrl: i.issueUrl };

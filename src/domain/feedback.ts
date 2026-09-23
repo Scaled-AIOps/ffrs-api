@@ -10,6 +10,7 @@ const SCREENSHOT_LINK_TTL_S = 7 * 24 * 3600;
 export const REF_MARKER = /<!--\s*ffrs:(FB-[A-Z0-9]{6})\s*-->/;
 
 export interface CaptureDeps {
+  tenant: string;
   tracker: Tracker;
   store: Store;
   branding: Branding;
@@ -35,7 +36,7 @@ export async function capture(deps: CaptureDeps, input: FeedbackInput, ctx: Capt
   let screenshotKey: string | null = null;
   let screenshotUrl: string | undefined;
   if (input.screenshot) {
-    screenshotKey = `screenshots/${now.toISOString().slice(0, 10)}/${ref}.jpg`;
+    screenshotKey = `screenshots/${deps.tenant}/${now.toISOString().slice(0, 10)}/${ref}.jpg`;
     await deps.store.putBlob(screenshotKey, decodeScreenshot(input.screenshot), 'image/jpeg');
     screenshotUrl = await deps.store.blobUrl(screenshotKey, SCREENSHOT_LINK_TTL_S);
   }
@@ -44,7 +45,7 @@ export async function capture(deps: CaptureDeps, input: FeedbackInput, ctx: Capt
   const issue = await deps.tracker.createIssue(issueBody(deps.branding, { ref, ...input, meta, createdAt: now }, screenshotUrl));
 
   const sidecar: Sidecar = {
-    ref, issueNumber: issue.number, issueUrl: issue.url, kind: input.kind, title: input.title, createdAt: now.toISOString(),
+    ref, tenant: deps.tenant, issueNumber: issue.number, issueUrl: issue.url, kind: input.kind, title: input.title, createdAt: now.toISOString(),
     email: input.consent ? (input.email ?? null) : null, consent: input.consent, screenshotKey, acknowledgedAt: null, closeEmailAt: null,
   };
 

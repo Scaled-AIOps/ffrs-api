@@ -18,10 +18,24 @@ export function clientIp(evt: APIGatewayProxyEventV2): string {
   return header(evt, 'x-forwarded-for')?.split(',')[0]?.trim() || evt.requestContext.http.sourceIp;
 }
 
-/** CORS only for explicitly allowed third-party embedders; same-origin needs nothing. */
+/**
+ * Exact origins, or `scheme://*.domain` for any subdomain of it (one or more labels) — never the
+ * bare domain, which must be listed on its own. Everything but the `*` is matched literally.
+ */
+export function originAllowed(allowed: string[], origin: string): boolean {
+  return allowed.some((p) => {
+    if (!p.includes('*')) return p === origin;
+    const m = /^(https?):\/\/\*\.([a-z0-9.-]+)$/.exec(p);
+    if (!m) return false;
+    const [, scheme, domain] = m;
+    return new RegExp(`^${scheme}://([a-z0-9-]+\\.)+${domain!.replace(/[.-]/g, '\\$&')}$`).test(origin);
+  });
+}
+
+/** CORS only for explicitly allowed embedders; same-origin needs nothing. */
 export function corsHeaders(evt: APIGatewayProxyEventV2, allowed: string[]): Record<string, string> {
   const origin = header(evt, 'origin');
-  if (!origin || !allowed.includes(origin)) return {};
+  if (!origin || !originAllowed(allowed, origin)) return {};
   return {
     'access-control-allow-origin': origin,
     'access-control-allow-methods': 'POST, GET, OPTIONS',

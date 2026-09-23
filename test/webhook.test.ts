@@ -2,7 +2,7 @@ import { createHmac } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { deriveOutcome } from '../src/domain/status.js';
 import { verifyGithubSignature } from '../src/domain/webhook.js';
-import { body, evt, testApp, validBug } from './helpers.js';
+import { body, evt, tenant, testApp, validBug } from './helpers.js';
 
 const sign = (secret: string, b: string) => `sha256=${createHmac('sha256', secret).update(b).digest('hex')}`;
 
@@ -26,18 +26,18 @@ describe('outcome + signature', () => {
 describe('POST /api/webhooks/github', () => {
   const secret = 'whsec';
   const post = (app: ReturnType<typeof testApp>['app'], event: string, payload: unknown, sig?: string) => {
-    const b = JSON.stringify(payload);
+    const b = JSON.stringify({ repository: { full_name: 'o/r' }, ...(payload as object) });
     return app({ ...evt('POST', '/api/webhooks/github', undefined, { 'x-github-event': event, 'x-hub-signature-256': sig ?? sign(secret, b) }), body: b });
   };
   it('404 without secret; 401 bad signature', async () => {
     const off = testApp();
     expect((await post(off.app, 'issues', {})).statusCode).toBe(404);
-    const on = testApp({ cfg: { ...off.deps.cfg, GITHUB_WEBHOOK_SECRET: secret } });
+    const on = testApp({ tenant: { ...tenant, webhookSecret: secret } });
     expect((await post(on.app, 'issues', { action: 'closed', issue: { number: 1, html_url: 'u', body: '' } }, 'sha256=00')).statusCode).toBe(401);
+    expect((await post(on.app, 'issues', { repository: { full_name: 'other/repo' }, action: 'closed', issue: { number: 1, html_url: 'u', body: '' } })).statusCode).toBe(404);
   });
   it('issue closed → closing email once; reopened re-arms; unknown issues ignored', async () => {
-    const base = testApp();
-    const { app, tracker, store, sent } = testApp({ cfg: { ...base.deps.cfg, GITHUB_WEBHOOK_SECRET: secret } });
+    const { app, tracker, store, sent } = testApp({ tenant: { ...tenant, webhookSecret: secret } });
     const { ref } = body(await app(evt('POST', '/api/feedback', validBug)));
     sent.length = 0;
     const issue = { number: 1, html_url: tracker.issues[0]!.url, body: tracker.issues[0]!.body, state_reason: 'completed', labels: [{ name: 'outcome:wontfix' }] };
@@ -52,8 +52,7 @@ describe('POST /api/webhooks/github', () => {
     expect(body(await post(app, 'issue_comment', { action: 'created', issue: { number: 1, body: 'no marker' }, comment: { id: 1, body: 'x' } }))).toEqual({ action: 'ignored', emailed: false });
   });
   it('issue_comment created → tooling footer removed; clean comments untouched', async () => {
-    const base = testApp();
-    const { app, tracker } = testApp({ cfg: { ...base.deps.cfg, GITHUB_WEBHOOK_SECRET: secret } });
+    const { app, tracker } = testApp({ tenant: { ...tenant, webhookSecret: secret } });
     const { ref } = body(await app(evt('POST', '/api/feedback', validBug)));
     const issue = { number: 1, body: tracker.issues[0]!.body };
     const text = '🤖 **FFRS agent — proposal**\n\nText.';

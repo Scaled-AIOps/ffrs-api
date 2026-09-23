@@ -1,6 +1,50 @@
 # ffrs-api
 
-Capture API of the **Fast Feedback Resolution System** (FFRS). Dependency-minimal by design: **GitHub Issues is the system of record**, one Node 22 Lambda routes to it, and a private S3 prefix holds the only personal data (a per-item sidecar with the submitter's email). No database. Reference implementation for scaledaiops.org; reusable by any site via one `<script>` tag (widget) and a handful of env vars. Plan: `scaledaiops.org/docs/ffrs-plan.md`.
+Capture API of the **Fast Feedback Resolution System** (FFRS), run by ScaledAIOps as one service
+for many sites. Dependency-minimal by design: **GitHub Issues is the system of record**, one Node 22
+Lambda routes to it, and a private S3 prefix holds the only personal data (a per-item sidecar with
+the submitter's email). No database.
+
+**Live at `https://ffrs.scaledaiops.org`** — a Lambda Function URL behind CloudFront. Every site is a
+**tenant**: its own tracker repo and token, allowed origins, branding and options, configured in
+SSM and picked up within five minutes, no deploy. Infrastructure: `aiops-tf-infra`, module `ffrs`.
+Plan and rationale: `docs/independent-service.md`.
+
+## Embed on any page
+
+```html
+<script src="https://ffrs.scaledaiops.org/widget.js" data-site="<slug>" defer></script>
+```
+
+One tag attaches the feedback tab; removing it detaches it. `data-site` names the tenant, and the
+page's origin must be on that tenant's list — a copied slug on another host gets a 403. Optional:
+`data-label`, `data-position="left"`; `rkFeedback.open()` / `.detach()` for programmatic control.
+The widget renders in a Shadow DOM with a constructed stylesheet, so host CSS can't reach it and a
+strict host CSP needs only `script-src` + `connect-src` for `ffrs.scaledaiops.org`.
+
+The original scaledaiops.org widget (`assets/js/ffrs-widget.js` in the site repo) still posts to
+`/api/feedback` with no `site` and is served by the **default tenant** — unchanged for the paper's
+measurement period.
+
+## Tenants
+
+```bash
+scripts/tenant.sh add <slug>       # prompts for each field, validates the token, assigns the pseudonym, prints the tag
+scripts/tenant.sh show|enable|disable|remove <slug>
+```
+
+| Field (SSM `/ffrs/tenants/<slug>/…`) | Required | Notes |
+|---|---|---|
+| `name`, `site_url`, `origins` | yes | Branding, status links, and every host allowed to embed. `https://*.example.com` covers every subdomain but not the bare domain, which is listed on its own |
+| `tracker_repo`, `github_token` (secret) | yes | Issues read/write on that one repo, created by the tenant |
+| `research` | yes | Opt-in to the anonymised export |
+| `pseudonym` | set by operator | `S1`, `S2`… — the only tenant identifier that reaches the paper |
+| `feedback_page` | no | Status page + no-JS form; default `<site_url>/feedback/` |
+| `alert_email`, `turnstile_secret`, `webhook_secret`, `agent_target_repo`, `rate_limit_per_min`, `brand` | no | |
+| `enabled` | yes | Per-tenant kill switch; `/ffrs/enabled` stops everything |
+
+A request names its tenant with `site` (the widget's `data-site`); with no `site`, the page's
+Origin decides, and with neither, the default tenant serves it.
 
 ## How the FFRS stages map
 
@@ -15,50 +59,45 @@ Capture API of the **Fast Feedback Resolution System** (FFRS). Dependency-minima
 
 | Route | Purpose |
 |---|---|
-| `POST /api/feedback` | Validate (Zod) → guards (rate limit, honeypot, Turnstile) → screenshot to S3 (private, presigned 7-day link in the issue) → **create issue** → ack + alert email (best-effort) → sidecar → `202 {ref}`. Idempotent on `Idempotency-Key`. GitHub down ⇒ `502 route_failed` (nothing half-stored; widget retries). Also accepts form-encoded → 303 to `/feedback/`. |
-| `GET /api/feedback/:ref` | Public timeline from GitHub + sidecar (timestamps only, never email/body). |
-| `POST /api/webhooks/github` | HMAC-verified. `issues.closed` → closing email once; `reopened` re-arms. 404 unless `GITHUB_WEBHOOK_SECRET`. |
-| EventBridge weekly (`{job:"weekly_report"}`) | Metrics per kind × ISO week (TTFR p50/p90, TTC p50, loop closure, signal) computed from the Issues API, filed as an issue labelled `ffrs-report`. |
+| `POST /api/feedback` | Resolve tenant → validate (Zod) → guards (per-tenant rate limit, honeypot, Turnstile) → screenshot to S3 (`screenshots/<tenant>/…`, presigned 7-day link in the issue) → **create issue** in the tenant's repo → ack + alert email (best-effort) → sidecar → `202 {ref, statusUrl}`. Idempotent on `Idempotency-Key`. GitHub down ⇒ `502 route_failed`. Form-encoded → 303 to the tenant's `feedback_page`. |
+| `GET /api/feedback/:ref` | Public timeline from GitHub + sidecar (timestamps only, never email/body). Refs are global; the sidecar knows its tenant. |
+| `POST /api/webhooks/github` | Tenant = the repository in the payload; HMAC-verified with that tenant's `webhook_secret`. `issues.closed` → closing email once; `reopened` re-arms; agent-comment footers stripped. |
+| EventBridge weekly (`{job:"weekly_report"}`) | Per tenant: metrics per kind × ISO week filed as an issue labelled `ffrs-report`. Across opted-in tenants: `research/<week>.csv` in the data bucket — pseudonym, kind, severity, timestamps, outcome, agent path; no text, contact, IP or link. |
 
 ## Agentic Respond stage (Phase 8)
 
-`agent/run.mjs` + `agent/workflows/ffrs-agent.yml` run a headless coding-agent CLI (`AGENT_CMD`) from GitHub Actions in the tracker repo: open a PR on the target repo (code/content path) or post a proposal with the `/accept` · `/confirm` · `/reject` protocol; `/confirm` by a maintainer executes. Metrics distinguish TTFR (any first response, agent included), TTHR (first human) and agent share (labels `agent:*`). See `agent/README.md`.
+`agent/run.mjs` + `agent/workflows/ffrs-agent.yml` run a headless coding-agent CLI (`AGENT_CMD`) from GitHub Actions in the tracker repo: open a PR on the target repo (code/content path) or post a proposal with the `/accept` · `/confirm` · `/reject` protocol; `/confirm` by a maintainer executes. Metrics distinguish TTFR (any first response, agent included), TTHR (first human) and agent share (labels `agent:*`). See `agent/README.md`. Per tenant, `agent_target_repo` says where PRs may go; absent means no agent.
 
-## Env
+## Env (service-wide)
 
-| Var | Required | Notes |
-|---|---|---|
-| `GITHUB_REPO`, `GITHUB_TOKEN` | yes | `owner/repo`; fine-grained token with Issues read/write on that repo (token via SSM) |
-| `DATA_BUCKET` | yes | private S3 bucket: `sidecar/`, `idem/`, `screenshots/` |
-| `SITE_NAME`, `SITE_URL` | yes / default | branding + status links |
-| `FROM_EMAIL`, `ALERT_EMAIL` | opt | SES sender (enables ack/close emails) and maintainer alert inbox |
-| `TURNSTILE_SECRET` | prod | absent = guard off (warned) |
-| `GITHUB_WEBHOOK_SECRET` | loop | enables the webhook route |
-| `SSM_PREFIX` | prod | `/ffrs` → secrets read at cold start (`github_token`, `github_webhook_secret`, `turnstile_secret`); kill switch `${SSM_PREFIX}/enabled` cached 60 s |
-| `ALLOWED_ORIGINS`, `RATE_LIMIT_PER_MIN`, `FFRS_ENABLED` | opt | CORS embedders; default 5/min per hashed IP; env fallback for the kill switch |
+| Var | Notes |
+|---|---|
+| `DATA_BUCKET` | private S3 bucket: `sidecar/`, `idem/`, `screenshots/<tenant>/`, `research/` |
+| `SSM_PREFIX` | `/ffrs` — tenants under `<prefix>/tenants/`, kill switch at `<prefix>/enabled` (cached 60 s) |
+| `DEFAULT_TENANT` | slug served when a request names no site |
+| `FROM_EMAIL` | SES sender; absent disables every email |
+| `TENANT_TTL_S` | tenant refresh interval, default 300 |
 
-## Develop
+## Develop and deploy
 
 ```bash
 npm install
-npm run check      # typecheck + vitest (in-memory Tracker/Store, no network) + esbuild + zip → dist/handler.zip
-GITHUB_TOKEN=… GITHUB_REPO=Scaled-AIOps/feedback npm run metrics > metrics.csv   # paper data
+npm run check        # typecheck + vitest (in-memory Tracker/Store, no network) + esbuild + zip → dist/handler.zip
+scripts/deploy.sh    # check, terraform apply (aiops-tf-infra, enable_ffrs=true), publish widget.js
+GITHUB_TOKEN=… GITHUB_REPO=Scaled-AIOps/feedback npm run metrics > metrics.csv   # one tenant's metrics straight from GitHub
 GITHUB_TOKEN=… GITHUB_REPO=Scaled-AIOps/feedback npm run export  > feedback.csv  # anonymised rows
 ```
-
-## GitHub setup (once)
-
-Repo labels are created on first use. Webhook: Settings → Webhooks → `https://<site>/api/webhooks/github`, JSON, events **Issues**, secret = SSM `/ffrs/github_webhook_secret`. Add `outcome:*` labels before closing to override the inferred outcome; label `spam` to exclude from the signal ratio.
 
 ## Layout
 
 ```
-src/handler.ts        Lambda entry: SSM secrets → config → adapters → app; job dispatch
-src/app.ts            HTTP routing + guards
-src/domain/           ports (Tracker, Store), capture(), status view, metrics, webhook, schema, ref
+src/handler.ts        Lambda entry: config → tenant registry (SSM, TTL) → per-tenant runtimes → app; job dispatch
+src/tenants.ts        Tenant schema, SSM loader, registry (by slug / origin / repo)
+src/app.ts            HTTP routing: tenant resolution, origin rule, guards
+src/domain/           ports (Tracker, Store), capture(), status view, metrics + research rows, webhook, schema, ref
 src/adapters/         githubTracker (REST), s3Store, memory twins for tests
 src/effects/          templates (ack, alert, close, issue body), SES mailer
 src/guards/           honeypot, rateLimit, turnstile
-src/reports/          weekly report + runner
-scripts/export.ts     CSV export CLI
+widget/widget.js      the embeddable tab, served at /widget.js
+scripts/              tenant.sh, deploy.sh, export.ts
 ```

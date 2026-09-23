@@ -30,6 +30,7 @@ export interface Tracker {
 /** Private per-item sidecar: the only place an email address ever lives. */
 export interface Sidecar {
   ref: string;
+  tenant: string | null;       // null on sidecars written before tenancy — they belong to the default tenant
   issueNumber: number;
   issueUrl: string;
   kind: Kind;

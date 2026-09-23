@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { memoryTracker } from '../src/adapters/memory.js';
 import { toCsv } from '../src/domain/csv.js';
 import { aggregate, collectItems, mondayOf, pct, toExportRow } from '../src/domain/metrics.js';
-import { runWeeklyReport } from '../src/reports/run.js';
+import { runWeeklyReports } from '../src/reports/run.js';
+import { registry } from '../src/tenants.js';
+import { tenant } from './helpers.js';
 import { weeklyReport } from '../src/reports/weekly.js';
 
 const H = 3600_000;
@@ -51,9 +53,24 @@ describe('metrics from GitHub', () => {
     const r = weeklyReport(rows, '2026-08-10', 'scaledaiops.org');
     expect(r.body).toContain('| 2026-08-10 | bug | 3 | 20.0 h | 2.5 d | 1.0 d | 3.0 d | 100% | 50% | 67% |');
     expect(weeklyReport(rows, '2026-08-17', 'x').body).toContain('_No feedback captured this week._');
-    const t = memoryTracker();
-    const out = await runWeeklyReport(t, { SITE_NAME: 'scaledaiops.org' }, new Date('2026-08-24T07:00:00Z'));
-    expect(out).toEqual({ week: '2026-08-17', url: 'https://github.com/o/r/issues/1' });
+    const t = memoryTracker(), t2 = memoryTracker(), blobs = new Map<string, string>();
+    await t2.createIssue({ title: '[bug] x', body: '<!-- ffrs:FB-XXXXXX -->', labels: ['ffrs', 'kind:bug'] });
+    const optedOut = { ...tenant, slug: 'quiet', trackerRepo: 'o/q', research: false };
+    const deps = {
+      tenants: async () => registry([tenant, optedOut], tenant.slug),
+      runtime: (x: typeof tenant) => ({ tracker: x.slug === 'quiet' ? t2 : t }),
+      store: { putBlob: async (k: string, b: Uint8Array) => { blobs.set(k, Buffer.from(b).toString()); } },
+    };
+    const out = await runWeeklyReports(deps, new Date('2026-08-24T07:00:00Z'));
+    expect(out).toEqual({ week: '2026-08-17', reports: [{ tenant: 'scaledaiops', url: 'https://github.com/o/r/issues/1' }, { tenant: 'quiet', url: 'https://github.com/o/r/issues/2' }], researchRows: 0 });
     expect(t.issues[0]!.labels).toEqual(['ffrs', 'ffrs-report']);
+    expect(blobs.size).toBe(0); // nothing captured on the opted-in tenant, and the other opted out
+    await t.createIssue({ title: '[feature] y', body: '<!-- ffrs:FB-YYYYYY -->', labels: ['ffrs', 'kind:feature'] });
+    const again = await runWeeklyReports(deps, new Date('2026-08-24T07:00:00Z'));
+    expect(again.researchRows).toBe(1);
+    const csv = blobs.get('research/2026-08-17.csv')!;
+    expect(csv.split('\r\n')[0]).toBe('site,ref,kind,severity,outcome,spam,agent,createdAt,respondedAt,humanRespondedAt,closedAt');
+    expect(csv).toContain('S1,FB-YYYYYY,feature');
+    expect(csv).not.toContain('github.com');
   });
 });

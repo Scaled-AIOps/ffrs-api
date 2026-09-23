@@ -3,12 +3,12 @@ import { z } from 'zod';
 import type { Sidecar, Store } from '../domain/ports.js';
 
 const SidecarSchema = z.object({
-  ref: z.string(), issueNumber: z.number(), issueUrl: z.string(), kind: z.enum(['bug', 'feature', 'contact']), title: z.string(),
+  ref: z.string(), tenant: z.string().nullable().default(null), issueNumber: z.number(), issueUrl: z.string(), kind: z.enum(['bug', 'feature', 'contact']), title: z.string(),
   createdAt: z.string(), email: z.string().nullable(), consent: z.boolean(), screenshotKey: z.string().nullable(),
   acknowledgedAt: z.string().nullable(), closeEmailAt: z.string().nullable(),
 });
 
-/** Private S3 prefix: `sidecar/<ref>.json`, `idem/<sha256(key)>`, `screenshots/…`. Bucket is private, encrypted, expiring. */
+/** Private S3 prefix: `sidecar/<ref>.json` (refs are global; the tenant is inside), `idem/<sha256(key)>`, `screenshots/<tenant>/…`, `research/`. */
 export function s3Store(bucket: string): Store {
   let client: import('@aws-sdk/client-s3').S3Client | undefined;
   const sdk = async () => { const m = await import('@aws-sdk/client-s3'); client ??= new m.S3Client({}); return { ...m, client }; };
