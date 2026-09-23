@@ -25,7 +25,7 @@ const Raw = z.object({
   webhook_secret: z.string().min(1).optional(),
   agent_target_repo: z.string().optional(),
   rate_limit_per_min: z.coerce.number().int().positive().default(5),
-  brand: z.string().optional(),
+  brand: z.string().regex(/^#[0-9a-fA-F]{6}$/, 'a #rrggbb colour').optional(), // status-page accent
   enabled: bool.default(true),
 });
 
@@ -36,11 +36,12 @@ export interface Tenant {
   agentTargetRepo: string | null; rateLimitPerMin: number; brand: string | null; enabled: boolean;
 }
 
-export function parseTenant(raw: Record<string, string>): Tenant {
+/** `serviceUrl` hosts the central status page, the default for tenants without their own. */
+export function parseTenant(raw: Record<string, string>, serviceUrl: string): Tenant {
   const t = Raw.parse(raw);
   return {
     slug: t.slug, name: t.name, siteUrl: t.site_url.replace(/\/$/, ''), origins: t.origins,
-    feedbackPage: t.feedback_page ?? `${t.site_url.replace(/\/$/, '')}/feedback/`,
+    feedbackPage: t.feedback_page ?? `${serviceUrl.replace(/\/$/, '')}/status/`,
     trackerRepo: t.tracker_repo, githubToken: t.github_token, research: t.research, pseudonym: t.pseudonym ?? null,
     alertEmail: t.alert_email ?? null, turnstileSecret: t.turnstile_secret ?? null, webhookSecret: t.webhook_secret ?? null,
     agentTargetRepo: t.agent_target_repo ?? null, rateLimitPerMin: t.rate_limit_per_min, brand: t.brand ?? null, enabled: t.enabled,
@@ -71,7 +72,7 @@ export function registry(tenants: Tenant[], defaultSlug: string): TenantRegistry
 }
 
 /** One recursive read of the tenants folder. A malformed tenant is skipped and logged, never fatal. */
-export async function loadTenants(prefix: string, defaultSlug: string): Promise<TenantRegistry> {
+export async function loadTenants(prefix: string, defaultSlug: string, serviceUrl: string): Promise<TenantRegistry> {
   const { SSMClient, GetParametersByPathCommand } = await import('@aws-sdk/client-ssm');
   const client = new SSMClient({});
   const path = `${prefix}/tenants/`;
@@ -88,7 +89,7 @@ export async function loadTenants(prefix: string, defaultSlug: string): Promise<
   } while (NextToken);
   const tenants: Tenant[] = [];
   for (const [slug, raw] of groups) {
-    try { tenants.push(parseTenant({ slug, ...raw })); }
+    try { tenants.push(parseTenant({ slug, ...raw }, serviceUrl)); }
     catch (err) { log('error', 'tenant_invalid', { slug, err: err instanceof z.ZodError ? err.issues : String(err) }); }
   }
   log('info', 'tenants_loaded', { tenants: tenants.map((t) => t.slug) });

@@ -14,7 +14,7 @@ as pseudonyms (`S2`, `S3`, …).
 | D3 | **One tracker repo per tenant**, in the tenant's own GitHub org, with a token scoped to that repo | A commercial site's feedback is its own data; a shared public tracker would leak it. Per-tenant repos are also what the agent needs to open PRs against that site |
 | D4 | **Research data is item-level, anonymised and opt-in per tenant** — pseudonym, kind, severity, timestamps, outcome, agent path; never text, contact, IP or link | Metrics are recomputed from rows, so a result can be reproduced and re-cut for a reviewer. Opt-in lets a tenant stay out cleanly |
 | D5 | **The widget tag names its tenant** (`data-site`), and the page's origin must be on that tenant's list; `https://*.example.com` covers subdomains | A copied slug on a foreign host gets a 403 |
-| D6 | **Status page per tenant** (`feedback_page`, default `<site>/feedback/`), linked from the widget and emails | A central, branded status page can replace it later without changing any tag |
+| D6 | **A central status page**, `ffrs.scaledaiops.org/status/?ref=`, rendered on the server and branded per tenant; a tenant may host its own instead (`feedback_page`) | New sites need to ship nothing to adopt the widget |
 | D7 | **Email from `feedback@scaledaiops.org`**, the tenant's name in the subject | One SES identity, already out of the sandbox |
 
 ## Onboarding a tenant
@@ -29,7 +29,8 @@ is deployed; the service re-reads tenants every five minutes. Fields are listed 
    against the repo, assigns the next pseudonym and prints the tag.
 3. The tenant adds the tag to its pages, allows `ffrs.scaledaiops.org` in its CSP
    (`script-src`, `connect-src`, and `form-action` if it hosts the no-JS form), and names the
-   research use in its privacy notice if `research` is on.
+   research use in its privacy notice if `research` is on (and passes `data-privacy` so the widget
+   links it). For closing emails, it adds the repo webhook with the tenant's `webhook_secret`.
 4. The operator submits one test item from the site, sees the issue land, closes it, and checks
    the status page shows it closed.
 

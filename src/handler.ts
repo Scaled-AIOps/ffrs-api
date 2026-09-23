@@ -25,7 +25,7 @@ async function init(): Promise<Wiring> {
   // Tenants refresh on a TTL so onboarding needs no deploy. Rate-limit buckets outlive a refresh.
   let reg: { value: TenantRegistry; fetchedAt: number } | undefined;
   const tenants = async (): Promise<TenantRegistry> => {
-    if (!reg || Date.now() - reg.fetchedAt > cfg.TENANT_TTL_S * 1000) reg = { value: await loadTenants(cfg.SSM_PREFIX, cfg.DEFAULT_TENANT), fetchedAt: Date.now() };
+    if (!reg || Date.now() - reg.fetchedAt > cfg.TENANT_TTL_S * 1000) reg = { value: await loadTenants(cfg.SSM_PREFIX, cfg.DEFAULT_TENANT, cfg.SERVICE_URL), fetchedAt: Date.now() };
     return reg.value;
   };
   const limiters = new Map<string, RateLimiter>();

@@ -5,7 +5,7 @@ import { capture } from './domain/feedback.js';
 import type { Store, Tracker } from './domain/ports.js';
 import { REF_PATTERN, newRef } from './domain/ref.js';
 import { FeedbackInput } from './domain/schema.js';
-import { statusOf } from './domain/status.js';
+import { statusOf, type StatusView } from './domain/status.js';
 import { handleGithubEvent, verifyGithubSignature } from './domain/webhook.js';
 import type { Mailer } from './effects/mailer.js';
 import { statusUrl, type Branding } from './effects/templates.js';
@@ -14,6 +14,7 @@ import type { RateLimiter } from './guards/rateLimit.js';
 import type { TurnstileVerify } from './guards/turnstile.js';
 import { clientIp, corsHeaders, error, header, isForm, json, originAllowed, parseBody, redirect, type Res } from './http.js';
 import { log } from './log.js';
+import { statusPage } from './statusPage.js';
 import type { Tenant, TenantRegistry } from './tenants.js';
 
 /** What a request needs once its tenant is known. Built per tenant by the handler, cached there. */
@@ -32,6 +33,7 @@ export interface AppDeps {
 const POST_FEEDBACK = /^\/api\/feedback\/?$/;
 const GET_FEEDBACK = /^\/api\/feedback\/(FB-[A-Z0-9]{6})\/?$/;
 const GITHUB_WEBHOOK = /^\/api\/webhooks\/github\/?$/;
+const STATUS_PAGE = /^\/status\/?$/;
 
 export const branding = (t: Tenant): Branding => ({ siteName: t.name, siteUrl: t.siteUrl, feedbackPage: t.feedbackPage });
 
@@ -47,6 +49,7 @@ export function createApp(deps: AppDeps): (evt: APIGatewayProxyEventV2) => Promi
       if (method === 'GET') {
         const ref = GET_FEEDBACK.exec(path)?.[1];
         if (ref) return withCors(evt, reg, await getFeedback(deps, reg, ref));
+        if (STATUS_PAGE.test(path)) return renderStatus(deps, reg, evt);
       }
       return error(404, 'not_found', 'no such route');
     } catch (err) {
@@ -132,13 +135,25 @@ async function postFeedbackJson(deps: AppDeps, rt: TenantRuntime, evt: APIGatewa
   }
 }
 
-async function getFeedback(deps: AppDeps, reg: TenantRegistry, ref: string): Promise<Res> {
-  if (!REF_PATTERN.test(ref)) return error(404, 'not_found', 'unknown reference');
+async function lookup(deps: AppDeps, reg: TenantRegistry, ref: string): Promise<{ tenant?: Tenant; view?: StatusView }> {
+  if (!REF_PATTERN.test(ref)) return {};
   const s = await deps.store.getSidecar(ref);
   // Sidecars from before tenancy carry no tenant: they belong to the site that existed then.
-  const t = s ? (s.tenant ? reg.get(s.tenant) : reg.default) : undefined;
-  const view = s && t ? await statusOf(deps.runtime(t).tracker, s) : undefined;
+  const tenant = s ? (s.tenant ? reg.get(s.tenant) : reg.default) : undefined;
+  const view = s && tenant ? await statusOf(deps.runtime(tenant).tracker, s) : undefined;
+  return { ...(tenant ? { tenant } : {}), ...(view ? { view } : {}) };
+}
+
+async function getFeedback(deps: AppDeps, reg: TenantRegistry, ref: string): Promise<Res> {
+  const { view } = await lookup(deps, reg, ref);
   return view ? json(200, view) : error(404, 'not_found', 'unknown reference');
+}
+
+async function renderStatus(deps: AppDeps, reg: TenantRegistry, evt: APIGatewayProxyEventV2): Promise<Res> {
+  const q = new URLSearchParams(evt.rawQueryString ?? '');
+  const ref = q.get('ref')?.trim().toUpperCase() || undefined;
+  const { tenant, view } = ref ? await lookup(deps, reg, ref) : {};
+  return statusPage({ tenant, ref, view, sent: q.get('sent') === '1', error: q.get('error') ?? undefined });
 }
 
 /** The webhook's tenant is the repository it fires from; each tenant verifies with its own secret. */

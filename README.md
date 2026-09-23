@@ -18,7 +18,8 @@ Plan and rationale: `docs/independent-service.md`.
 
 One tag attaches the feedback tab; removing it detaches it. `data-site` names the tenant, and the
 page's origin must be on that tenant's list — a copied slug on another host gets a 403. Optional:
-`data-label`, `data-position="left"`; `rkFeedback.open()` / `.detach()` for programmatic control.
+`data-label`, `data-position="left"`, `data-privacy="/privacy/"` (linked beside the consent box);
+`rkFeedback.open()` / `.detach()` for programmatic control.
 The widget renders in a Shadow DOM with a constructed stylesheet, so host CSS can't reach it and a
 strict host CSP needs only `script-src` + `connect-src` for `ffrs.scaledaiops.org`.
 
@@ -39,8 +40,10 @@ scripts/tenant.sh show|enable|disable|remove <slug>
 | `tracker_repo`, `github_token` (secret) | yes | Issues read/write on that one repo, created by the tenant |
 | `research` | yes | Opt-in to the anonymised export |
 | `pseudonym` | set by operator | `S1`, `S2`… — the only tenant identifier that reaches the paper |
-| `feedback_page` | no | Status page + no-JS form; default `<site_url>/feedback/` |
-| `alert_email`, `turnstile_secret`, `webhook_secret`, `agent_target_repo`, `rate_limit_per_min`, `brand` | no | |
+| `feedback_page` | no | The tenant's own status page + no-JS form; default is the central `https://ffrs.scaledaiops.org/status/` |
+| `webhook_secret` (secret) | for closing emails | Add a repo webhook → `https://ffrs.scaledaiops.org/api/webhooks/github`, JSON, events Issues + Issue comments, this secret |
+| `alert_email`, `turnstile_secret`, `agent_target_repo`, `rate_limit_per_min` | no | |
+| `brand` | no | `#rrggbb` accent for the central status page |
 | `enabled` | yes | Per-tenant kill switch; `/ffrs/enabled` stops everything |
 
 A request names its tenant with `site` (the widget's `data-site`); with no `site`, the page's
@@ -61,6 +64,7 @@ Origin decides, and with neither, the default tenant serves it.
 |---|---|
 | `POST /api/feedback` | Resolve tenant → validate (Zod) → guards (per-tenant rate limit, honeypot, Turnstile) → screenshot to S3 (`screenshots/<tenant>/…`, presigned 7-day link in the issue) → **create issue** in the tenant's repo → ack + alert email (best-effort) → sidecar → `202 {ref, statusUrl}`. Idempotent on `Idempotency-Key`. GitHub down ⇒ `502 route_failed`. Form-encoded → 303 to the tenant's `feedback_page`. |
 | `GET /api/feedback/:ref` | Public timeline from GitHub + sidecar (timestamps only, never email/body). Refs are global; the sidecar knows its tenant. |
+| `GET /status/?ref=` | The central status page, rendered on the server (no JavaScript), branded for the item's tenant. Default `feedback_page` for tenants without their own; also takes `?sent=1` / `?error=` from the no-JS form. |
 | `POST /api/webhooks/github` | Tenant = the repository in the payload; HMAC-verified with that tenant's `webhook_secret`. `issues.closed` → closing email once; `reopened` re-arms; agent-comment footers stripped. |
 | EventBridge weekly (`{job:"weekly_report"}`) | Per tenant: metrics per kind × ISO week filed as an issue labelled `ffrs-report`. Across opted-in tenants: `research/<week>.csv` in the data bucket — pseudonym, kind, severity, timestamps, outcome, agent path; no text, contact, IP or link. |
 
@@ -77,6 +81,7 @@ Origin decides, and with neither, the default tenant serves it.
 | `DEFAULT_TENANT` | slug served when a request names no site |
 | `FROM_EMAIL` | SES sender; absent disables every email |
 | `TENANT_TTL_S` | tenant refresh interval, default 300 |
+| `SERVICE_URL` | the service host, for the central status page links |
 
 ## Develop and deploy
 
@@ -94,6 +99,7 @@ GITHUB_TOKEN=… GITHUB_REPO=Scaled-AIOps/feedback npm run export  > feedback.cs
 src/handler.ts        Lambda entry: config → tenant registry (SSM, TTL) → per-tenant runtimes → app; job dispatch
 src/tenants.ts        Tenant schema, SSM loader, registry (by slug / origin / repo)
 src/app.ts            HTTP routing: tenant resolution, origin rule, guards
+src/statusPage.ts     the central /status/ page (server-rendered, hash-pinned CSP)
 src/domain/           ports (Tracker, Store), capture(), status view, metrics + research rows, webhook, schema, ref
 src/adapters/         githubTracker (REST), s3Store, memory twins for tests
 src/effects/          templates (ack, alert, close, issue body), SES mailer

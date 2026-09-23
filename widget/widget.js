@@ -1,7 +1,8 @@
 // FFRS feedback widget. Attach to any page with one tag; remove the tag to detach:
 //   <script src="https://ffrs.scaledaiops.org/widget.js" data-site="example" defer></script>
 // data-site names the tenant; the page's origin must be on that tenant's list. Optional:
-// data-label="Feedback", data-position="right|left".
+// data-label="Feedback", data-position="right|left", data-privacy="/privacy/" (linked beside the
+// consent box).
 // Renders in a Shadow DOM with a constructed stylesheet, so host CSS can't reach it and a strict
 // host CSP only needs script-src + connect-src for this host (no inline styles).
 (() => {
@@ -12,6 +13,7 @@
   if (!site) { console.error('ffrs widget: data-site is required'); return; }
   const label = tag.dataset.label || 'Feedback';
   const side = tag.dataset.position === 'left' ? 'left' : 'right';
+  const privacy = tag.dataset.privacy;
 
   const css = `
     :host { all: initial; }
@@ -30,6 +32,7 @@
     form { display: grid; gap: 10px; padding: 16px 18px 18px; }
     label { display: grid; gap: 5px; font-size: 13px; font-weight: 600; color: #0f2a4d; }
     .check { display: flex; gap: 8px; align-items: center; font-weight: 400; color: #56677e; }
+    .privacy { margin: -4px 0 0; font-size: 12px; color: #56677e; }
     input, select, textarea { font: inherit; font-size: 14px; padding: 8px 10px; border: 1px solid #e4e9f1; border-radius: 8px; color: #0b1b30; background: #fff; }
     input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px solid #2f9bf5; outline-offset: 1px; }
     .hp { position: absolute; left: -9999px; width: 1px; height: 1px; }
@@ -71,6 +74,7 @@
           <label>Details <textarea name="body" required minlength="10" maxlength="5000" rows="4"></textarea></label>
           <label>Email <input name="email" type="email" maxlength="254" placeholder="optional"></label>
           <label class="check"><input type="checkbox" name="consent"> You may contact me about this</label>
+          <p class="privacy" hidden>How we use this: <a target="_blank" rel="noopener">privacy</a>.</p>
           <input class="hp" name="website" tabindex="-1" autocomplete="off" aria-hidden="true">
           <button class="send" type="submit">Send</button>
           <p class="msg" role="status" aria-live="polite"></p>
@@ -79,6 +83,7 @@
     </div>`;
 
   const $ = (s) => root.querySelector(s);
+  if (privacy) { $('.privacy a').href = new URL(privacy, location.href).href; $('.privacy').hidden = false; }
   const veil = $('.veil');
   const form = $('form');
   const msg = $('.msg');

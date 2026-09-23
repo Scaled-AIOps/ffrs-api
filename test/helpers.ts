@@ -6,7 +6,7 @@ import type { Mail } from '../src/effects/mailer.js';
 import { RateLimiter } from '../src/guards/rateLimit.js';
 import { registry, type Tenant } from '../src/tenants.js';
 
-export const cfg: Config = { DATA_BUCKET: 'b', SSM_PREFIX: '/ffrs', DEFAULT_TENANT: 'scaledaiops', TENANT_TTL_S: 300 };
+export const cfg: Config = { DATA_BUCKET: 'b', SSM_PREFIX: '/ffrs', DEFAULT_TENANT: 'scaledaiops', TENANT_TTL_S: 300, SERVICE_URL: 'https://ffrs.scaledaiops.org' };
 
 export const tenant: Tenant = {
   slug: 'scaledaiops', name: 'scaledaiops.org', siteUrl: 'https://www.scaledaiops.org', feedbackPage: 'https://www.scaledaiops.org/feedback/',
@@ -33,8 +33,9 @@ export function evt(method: string, path: string, body?: unknown, headers: Recor
   return {
     version: '2.0', routeKey: '$default', rawPath: path, rawQueryString: '', headers: { 'user-agent': 'vitest', ...headers },
     requestContext: { accountId: '', apiId: '', domainName: '', domainPrefix: '', requestId: 'r', routeKey: '$default', stage: '$default', time: '', timeEpoch: 0,
-      http: { method, path, protocol: 'HTTP/1.1', sourceIp: ip, userAgent: 'vitest' } },
+      http: { method, path: path.split('?')[0]!, protocol: 'HTTP/1.1', sourceIp: ip, userAgent: 'vitest' } },
     body: body === undefined ? undefined : JSON.stringify(body), isBase64Encoded: false,
+    ...(path.includes('?') ? { rawPath: path.split('?')[0], rawQueryString: path.split('?')[1] } : {}),
   } as unknown as APIGatewayProxyEventV2;
 }
 export const body = (r: { body?: string | undefined }) => JSON.parse(r.body ?? '{}');

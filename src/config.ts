@@ -5,6 +5,7 @@ const Env = z.object({
   DATA_BUCKET: z.string().min(1), // private S3 bucket: sidecars, idempotency map, screenshots, research exports
   SSM_PREFIX: z.string().min(1),  // e.g. /ffrs — tenants live under <prefix>/tenants/, the kill switch at <prefix>/enabled
   DEFAULT_TENANT: z.string().min(1), // serves requests that name no site (the original single-site widget)
+  SERVICE_URL: z.string().url().default('https://ffrs.scaledaiops.org'), // hosts /status/ for tenants without their own page
   FROM_EMAIL: z.string().email().optional(), // absent = no emails at all
   TENANT_TTL_S: z.coerce.number().int().positive().default(300),
 });

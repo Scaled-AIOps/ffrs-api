@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { memoryTracker } from '../src/adapters/memory.js';
-import type { Tenant } from '../src/tenants.js';
+import { parseTenant, type Tenant } from '../src/tenants.js';
 import { body, evt, tenant, testApp, validBug, validFeature } from './helpers.js';
 
 describe('POST /api/feedback', () => {
@@ -156,6 +156,28 @@ describe('tenants', () => {
     expect(body(r).error.code).toBe('origin_not_allowed');
     const off = testApp({}, [{ ...rk, enabled: false }]);
     expect(body(await off.app(evt('POST', '/api/feedback', { ...validFeature, site: 'example' }))).error.code).toBe('ffrs_disabled');
+  });
+  it('a tenant without its own page defaults to the central status page', () => {
+    const t = parseTenant({ slug: 'plain', name: 'Plain', site_url: 'https://www.example.com/', origins: 'https://www.example.com', tracker_repo: 'o/p', github_token: 'x' }, 'https://ffrs.scaledaiops.org');
+    expect(t.feedbackPage).toBe('https://ffrs.scaledaiops.org/status/');
+    expect(() => parseTenant({ slug: 'plain', name: 'P', site_url: 'https://x.io', origins: 'https://x.io', tracker_repo: 'o/p', github_token: 'x', brand: 'red;}body{' }, 'https://s')).toThrow();
+  });
+  it('/status/ renders the timeline branded for the tenant, escapes input, 404s unknown refs, and needs no JS', async () => {
+    const { app } = testApp({ tenant: { ...tenant, brand: '#123456' } });
+    const { ref } = body(await app(evt('POST', '/api/feedback', validFeature)));
+    const page = await app(evt('GET', `/status/?ref=${ref.toLowerCase()}&sent=1`));
+    expect(page.statusCode).toBe(200);
+    expect(page.headers?.['content-type']).toMatch(/^text\/html/);
+    expect(page.headers?.['content-security-policy']).toMatch(/style-src 'sha256-/);
+    expect(page.body).toContain('scaledaiops.org feedback');
+    expect(page.body).toContain('--a:#123456');
+    expect(page.body).toContain('<dt>Status</dt><dd>Received</dd>');
+    expect(page.body).toContain('it’s logged');
+    expect(page.body).not.toContain('<script');
+    const missing = await app(evt('GET', '/status/?ref=FB-ZZZZZZ&error=%3Cb%3Ex'));
+    expect(missing.statusCode).toBe(404);
+    expect(missing.body).toContain('&lt;b&gt;x');
+    expect((await app(evt('GET', '/status'))).statusCode).toBe(200);
   });
   it('form posts redirect to that tenant\'s own page', async () => {
     const { app } = testApp({}, [rk]);
