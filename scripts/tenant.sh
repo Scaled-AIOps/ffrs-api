@@ -36,7 +36,6 @@ add)
   ask TENANT_RESEARCH "Research export opt-in (true/false)"
   ask TENANT_ALERT_EMAIL "Alert email (blank = none)"
   ask TENANT_FEEDBACK_PAGE "Feedback/status page URL (blank = <site>/feedback/)"
-  ask TENANT_AGENT_TARGET_REPO "Agent target repo (blank = no agent)"
 
   # One read call proves the token reaches the repo before anything is written.
   code=$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $TENANT_GITHUB_TOKEN" "https://api.github.com/repos/$TENANT_TRACKER_REPO")
@@ -57,15 +56,9 @@ add)
   put pseudonym String "$pseudonym"
   put alert_email String "$TENANT_ALERT_EMAIL"
   put feedback_page String "$TENANT_FEEDBACK_PAGE"
-  put agent_target_repo String "$TENANT_AGENT_TARGET_REPO"
   put turnstile_secret SecureString "${TENANT_TURNSTILE_SECRET:-}"
   put webhook_secret SecureString "${TENANT_WEBHOOK_SECRET:-}"
   put enabled String true
-  # The agent runs as a workflow in the tracker repo; this variable is what points it at the site.
-  if [[ -n "$TENANT_AGENT_TARGET_REPO" ]]; then
-    gh variable set FFRS_TARGET_REPO --repo "$TENANT_TRACKER_REPO" --body "$TENANT_AGENT_TARGET_REPO"
-    echo "agent: install agent/workflows/ffrs-agent.yml in $TENANT_TRACKER_REPO and set its AGENT_* variables/secrets and FFRS_AGENT_TOKEN"
-  fi
   echo "tenant $slug written as $pseudonym — live within 5 minutes. Embed:"
   echo "  <script src=\"https://ffrs.scaledaiops.org/widget.js\" data-site=\"$slug\" defer></script>"
   ;;

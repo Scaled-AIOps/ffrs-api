@@ -23,7 +23,6 @@ const Raw = z.object({
   alert_email: z.string().email().optional(),
   turnstile_secret: z.string().min(1).optional(),
   webhook_secret: z.string().min(1).optional(),
-  agent_target_repo: z.string().optional(),
   rate_limit_per_min: z.coerce.number().int().positive().default(5),
   brand: z.string().regex(/^#[0-9a-fA-F]{6}$/, 'a #rrggbb colour').optional(), // status-page accent
   enabled: bool.default(true),
@@ -33,7 +32,7 @@ export interface Tenant {
   slug: string; name: string; siteUrl: string; feedbackPage: string; origins: string[];
   trackerRepo: string; githubToken: string; research: boolean; pseudonym: string | null;
   alertEmail: string | null; turnstileSecret: string | null; webhookSecret: string | null;
-  agentTargetRepo: string | null; rateLimitPerMin: number; brand: string | null; enabled: boolean;
+  rateLimitPerMin: number; brand: string | null; enabled: boolean;
 }
 
 /** `serviceUrl` hosts the central status page, the default for tenants without their own. */
@@ -44,7 +43,7 @@ export function parseTenant(raw: Record<string, string>, serviceUrl: string): Te
     feedbackPage: t.feedback_page ?? `${serviceUrl.replace(/\/$/, '')}/status/`,
     trackerRepo: t.tracker_repo, githubToken: t.github_token, research: t.research, pseudonym: t.pseudonym ?? null,
     alertEmail: t.alert_email ?? null, turnstileSecret: t.turnstile_secret ?? null, webhookSecret: t.webhook_secret ?? null,
-    agentTargetRepo: t.agent_target_repo ?? null, rateLimitPerMin: t.rate_limit_per_min, brand: t.brand ?? null, enabled: t.enabled,
+    rateLimitPerMin: t.rate_limit_per_min, brand: t.brand ?? null, enabled: t.enabled,
   };
 }
 

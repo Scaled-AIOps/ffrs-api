@@ -11,7 +11,7 @@ export const cfg: Config = { DATA_BUCKET: 'b', SSM_PREFIX: '/ffrs', DEFAULT_TENA
 export const tenant: Tenant = {
   slug: 'scaledaiops', name: 'scaledaiops.org', siteUrl: 'https://www.scaledaiops.org', feedbackPage: 'https://www.scaledaiops.org/feedback/',
   origins: ['https://www.scaledaiops.org', 'https://embedder.example'], trackerRepo: 'o/r', githubToken: 't', research: true, pseudonym: 'S1',
-  alertEmail: 'team@example.org', turnstileSecret: null, webhookSecret: null, agentTargetRepo: null, rateLimitPerMin: 5, brand: null, enabled: true,
+  alertEmail: 'team@example.org', turnstileSecret: null, webhookSecret: null, rateLimitPerMin: 5, brand: null, enabled: true,
 };
 export const branding = { siteName: tenant.name, siteUrl: tenant.siteUrl, feedbackPage: tenant.feedbackPage };
 

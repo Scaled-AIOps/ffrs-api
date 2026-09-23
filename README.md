@@ -44,7 +44,7 @@ scripts/tenant.sh show|enable|disable|remove <slug>
 | `pseudonym` | set by operator | `S1`, `S2`… — the only tenant identifier that reaches the paper |
 | `feedback_page` | no | The tenant's own status page + no-JS form; default is the central `https://ffrs.scaledaiops.org/status/` |
 | `webhook_secret` (secret) | for closing emails | Add a repo webhook → `https://ffrs.scaledaiops.org/api/webhooks/github`, JSON, events Issues + Issue comments, this secret |
-| `alert_email`, `turnstile_secret`, `agent_target_repo`, `rate_limit_per_min` | no | |
+| `alert_email`, `turnstile_secret`, `rate_limit_per_min` | no | |
 | `brand` | no | `#rrggbb` accent for the central status page |
 | `enabled` | yes | Per-tenant kill switch; `/ffrs/enabled` stops everything |
 
@@ -72,7 +72,7 @@ Origin decides, and with neither, the default tenant serves it.
 
 ## Agentic Respond stage (Phase 8)
 
-`agent/run.mjs` + `agent/workflows/ffrs-agent.yml` run a headless coding-agent CLI (`AGENT_CMD`) from GitHub Actions in the tracker repo: open a PR on the target repo (code/content path) or post a proposal with the `/accept` · `/confirm` · `/reject` protocol; `/confirm` by a maintainer executes. Metrics distinguish TTFR (any first response, agent included), TTHR (first human) and agent share (labels `agent:*`). See `agent/README.md`. Per tenant, `agent_target_repo` says where PRs may go; `tenant.sh add` copies it into the tracker repo's `FFRS_TARGET_REPO` variable, which the workflow reads — unset means no agent.
+A hosted coding-agent routine (hourly, prompt `agent/routine-prompt.md`) opens a PR on the site repo (code/content path) or posts a proposal with the `/accept` · `/confirm` · `/reject` protocol; `/confirm` by a maintainer executes, and `agent/workflows/ffrs-commands.yml` in the tracker repo labels the other two commands. Metrics distinguish TTFR (any first response, agent included), TTHR (first human) and agent share (labels `agent:*`). See `agent/README.md`.
 
 ## Env (service-wide)
 

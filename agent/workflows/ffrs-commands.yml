@@ -1,0 +1,24 @@
+# Copy to <tracker repo>/.github/workflows/ffrs-commands.yml. Turns /accept and /reject on an agent
+# proposal into labels; the agent routine acts on them (and on /confirm) at its next run.
+name: FFRS commands
+on:
+  issue_comment:
+    types: [created]
+permissions:
+  issues: write
+jobs:
+  label:
+    if: >-
+      contains(github.event.issue.labels.*.name, 'agent:proposal') &&
+      (contains(github.event.comment.body, '/accept') || contains(github.event.comment.body, '/reject'))
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          BODY: ${{ github.event.comment.body }}
+          NUMBER: ${{ github.event.issue.number }}
+        run: |
+          set -euo pipefail
+          case "$BODY" in *"/accept"*) gh issue edit "$NUMBER" --repo "$REPO" --add-label requester:accepted;; esac
+          case "$BODY" in *"/reject"*) gh issue edit "$NUMBER" --repo "$REPO" --add-label agent:rejected --remove-label agent:proposal;; esac
